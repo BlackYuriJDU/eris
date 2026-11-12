@@ -5,7 +5,8 @@ from Bio.Seq import reverse_complement
 
 from eris.constants import Context, Effect
 from isoforms import read_isoform_groups
-from relation_scoring import GenePlacer, Placement, TruthRelation, read_truth, score_relations
+from relation_scoring import (GenePlacer, ISCopy, Placement, TruthRelation, expected_relations, read_is_copies,
+                              read_truth, score_assignment, score_relations)
 
 GROUPS = {"ISA": "grpA", "ISB": "grpB"}
 
@@ -15,8 +16,8 @@ def relation(gene_id, spatial, dist=0, topo=0, effect=Effect.NONE, contig="ctg")
     return SimpleNamespace(feature=feature, spatial=spatial, distance_bp=dist, topological_dist=topo, effect=effect)
 
 
-def locus(name, passengers=(), up=(), down=()):
-    return SimpleNamespace(id=f"locus_{name}", targets=[SimpleNamespace(id=f"{name}_fam_grp")],
+def locus(name, passengers=(), up=(), down=(), id_=None):
+    return SimpleNamespace(id=id_ or f"locus_{name}", targets=[SimpleNamespace(id=f"{name}_fam_grp")],
                            passengers=list(passengers), upstream_flanks=list(up), downstream_flanks=list(down))
 
 
@@ -175,3 +176,157 @@ def test_genes_are_placed_by_alignment_or_exact_search(tmp_path):
     # Too short for minimap2
     assert placer.place(reverse_complement(chrom[15000:15060]).encode()) == [Placement("chr", 15000, 15060, "-", 1.0)]
     assert placer.place(b"ACGT" * 15) == []
+
+
+# Assignment score (#52) ---------------------------------------------------------------------------------------------
+def copy(name, start, end, strand="+", group=None):
+    return ISCopy(name=name, group=group or GROUPS[name.split("_")[0]], replicon="chr", start=start, end=end,
+                  strand=strand)
+
+
+def at(c: ISCopy) -> Placement:
+    return Placement(c.replicon, c.start, c.end, c.strand, 1.0)
+
+
+def covering(**by_locus):
+    """locus id -> the truth copies its IS segments place onto."""
+    return lambda lc: [at(c) for c in by_locus.get(lc.id, [])]
+
+
+def errors(score, kind):
+    return {e for e in score.errors if e[1].startswith(kind)}
+
+
+A1, B1 = copy("ISA_1", 10000, 11000), copy("ISB_1", 50000, 51000, "-")
+
+
+def test_expected_relations_are_the_nearest_eris_gene_on_each_side_of_each_copy():
+    place = placed(a_far=(7000, 8500), a_up=(9000, 9900), a_up_dup=(9000, 9890),  # the same gene, called twice
+                   tnp=(10100, 10900),  # inside the IS: not a flank
+                   a_down=(10980, 12000),  # crosses the IS's end
+                   b_left=(48000, 49990), b_right=(51050, 52000))  # B1 is read on -, so its upstream is to the right
+    genes = ["a_far", "a_up", "a_up_dup", "tnp", "a_down", "b_left", "b_right", "unplaced"]
+    expected = {(e.key, e.genes, e.distances) for e in expected_relations([A1, B1], genes, place)}
+
+    assert expected == {(("grpA", "upstream", "a_up"), frozenset({"a_up", "a_up_dup"}), frozenset({100})),
+                        (("grpA", "downstream", "a_down"), frozenset({"a_down"}), frozenset({-20})),
+                        (("grpB", "upstream", "b_right"), frozenset({"b_right"}), frozenset({50})),
+                        (("grpB", "downstream", "b_left"), frozenset({"b_left"}), frozenset({10}))}
+
+
+def test_expected_relations_wrap_around_a_circular_replicon():
+    near_origin = copy("ISA_1", 500, 1500)
+    place = placed(g_end=(99000, 99800), g_mid=(60000, 61000))
+    expected = expected_relations([near_origin], ["g_end", "g_mid"], place, lengths={"chr": 100000})
+
+    assert {e.key: e.distances for e in expected} == {("grpA", "upstream", "g_end"): frozenset({700}),
+                                                      ("grpA", "downstream", "g_mid"): frozenset({58500})}
+
+
+def test_each_wrong_first_flank_gets_one_cause_and_overcalls_leave_the_headline():
+    place = placed(a_far=(7000, 8500), a_up=(9000, 9900), a_down=(11100, 12000), a_next=(12500, 13000),
+                   b_left=(48000, 49990), b_right=(51050, 52000))
+    genes = ["a_far", "a_up", "a_down", "a_next", "b_left", "b_right"]
+    loci = [locus("ISA", up=[relation("a_up", Context.UPSTREAM)], down=[relation("b_left", Context.DOWNSTREAM)]),
+            locus("ISA", down=[relation("a_next", Context.DOWNSTREAM)], id_="locus_ISA_2"),
+            locus("ISB", up=[relation("b_left", Context.UPSTREAM)], down=[relation("short", Context.DOWNSTREAM)]),
+            locus("ISC", up=[relation("a_far", Context.UPSTREAM)])]  # no truth copy of ISC
+    cover = covering(locus_ISA=[A1], locus_ISA_2=[A1], locus_ISB=[B1])
+    score = score_assignment([A1, B1], genes, loci, GROUPS, place, cover)
+
+    assert errors(score, "FP") == {(("grpA", "downstream", "b_left"), "FP_group"),
+                                   (("grpA", "downstream", "a_next"), "FP_not_nearest"),
+                                   (("grpB", "upstream", "b_left"), "FP_side"),
+                                   (("grpB", "downstream", "short"), "FP_unplaced"),
+                                   (("ISC", "upstream", "a_far"), "FP_overcall")}
+    assert (score.first_flanks, score.overcalls) == (6, 1)
+    assert score.precision("nearest") == 1 / 5
+
+
+def test_each_missed_relation_gets_one_cause_and_undetected_copies_leave_the_headline():
+    a2, b2 = copy("ISA_2", 30000, 31000), copy("ISB_2", 70000, 71000, "-")
+    place = placed(a_up=(9000, 9900), a_down=(11100, 12000), a2_up=(29000, 29950), a2_down=(31050, 32000),
+                   b_left=(48000, 49990), b_right=(51050, 52000), b2_left=(69000, 69900))
+    genes = ["a_up", "a_down", "a2_up", "a2_down", "b_left", "b_right", "b2_left"]
+    loci = [locus("ISA", up=[relation("a_up", Context.UPSTREAM), relation("a_down", Context.UPSTREAM, 1100)],
+                  down=[relation("b_left", Context.DOWNSTREAM)]),
+            locus("ISB")]
+    reach = [locus("ISB", up=[relation("b_right", Context.UPSTREAM, topo=5)])]
+    cover = covering(locus_ISA=[A1], locus_ISB=[B1, b2])  # nothing covers ISA_2
+    score = score_assignment([A1, a2, B1, b2], genes, loci, GROUPS, place, cover, reach_loci=reach)
+
+    assert errors(score, "FN") == {(("grpA", "downstream", "a_down"), "FN_side"),
+                                   (("grpA", "upstream", "a2_up"), "FN_undetected"),
+                                   (("grpA", "downstream", "a2_down"), "FN_undetected"),
+                                   (("grpB", "downstream", "b_left"), "FN_group"),
+                                   (("grpB", "upstream", "b_right"), "FN_budget"),
+                                   (("grpB", "downstream", "b2_left"), "FN_unreported")}
+    assert (score.expected, score.undetected) == (7, 2)
+    assert score.recall("nearest") == 1 / 5
+
+
+def test_a_repeat_hub_expects_the_nearest_genes_of_all_its_copies():
+    a2 = copy("ISA_2", 30000, 31000)
+    place = placed(a_up=(9000, 9900), a_down=(11100, 12000), a2_up=(29000, 29950), a2_down=(31050, 32000))
+    # One repeat contig, a flanking contig per copy on each side
+    hub = locus("ISA", up=[relation("a_up", Context.UPSTREAM, topo=1, contig="c1"),
+                           relation("a2_up", Context.UPSTREAM, topo=1, contig="c2")],
+                down=[relation("a_down", Context.DOWNSTREAM, topo=1, contig="c3"),
+                      relation("a2_down", Context.DOWNSTREAM, topo=1, contig="c4")])
+    score = score_assignment([A1, a2], ["a_up", "a_down", "a2_up", "a2_down"], [hub], GROUPS, place,
+                             covering(locus_ISA=[A1, a2]))
+
+    assert (score.precision("nearest"), score.recall("nearest")) == (1.0, 1.0)
+    assert score.errors == set()
+
+
+def test_tiers_add_nearest_then_distance():
+    place = placed(a_far=(7000, 8500), a_up=(9000, 9900), a_down=(11000, 12000))
+    # a_far is on the right side but not the nearest; a_down is the nearest, but eris puts it far rather than near
+    loci = [locus("ISA", up=[relation("a_far", Context.UPSTREAM, 1500)],
+                  down=[relation("a_down", Context.DOWNSTREAM, 400)])]
+    score = score_assignment([A1], ["a_far", "a_up", "a_down"], loci, GROUPS, place, covering(locus_ISA=[A1]))
+
+    assert [score.precision(t) for t in ("side", "nearest", "distance")] == [1.0, 0.5, 0.0]
+    assert [score.recall(t) for t in ("side", "nearest", "distance")] == [0.5, 0.5, 0.0]
+    assert (score.band_agreement, score.distance_errors) == (0.0, [400])
+
+
+def test_side_tier_credits_every_flank_the_nearest_tier_credits():
+    # Between two tandem copies, g is the nearest gene upstream of ISA_2, though nearer to ISA_1's downstream end
+    a2 = copy("ISA_2", 12000, 13000)
+    loci = [locus("ISA", up=[relation("g", Context.UPSTREAM, 500)])]
+    score = score_assignment([A1, a2], ["g"], loci, GROUPS, placed(g=(11100, 11500)), covering(locus_ISA=[a2]))
+
+    assert (score.precision("side"), score.precision("nearest")) == (1.0, 1.0)
+
+
+def test_distance_of_a_hub_flank_is_checked_against_the_copy_it_flanks():
+    # A gene repeated next to two copies: 50 bp upstream of one, 400 bp upstream of the other
+    a2 = copy("ISA_2", 30000, 31000)
+    copies = {"rep": [Placement("chr", 9000, 9950, "+", 1.0), Placement("chr", 28700, 29600, "+", 1.0)]}
+    hub = locus("ISA", up=[relation("rep", Context.UPSTREAM, 400, topo=1)])
+    score = score_assignment([A1, a2], ["rep"], [hub], GROUPS, lambda g: copies.get(g, []),
+                             covering(locus_ISA=[A1, a2]))
+
+    assert (score.precision("distance"), score.distance_errors) == (1.0, [0])
+
+
+def test_is_copies_are_read_from_the_bed(tmp_path):
+    (tmp_path / "is.bed").write_text("chr\t100\t900\tISA_1\t0\t+\nchr\t2000\t2800\tISB\t0\t-\npl\t5\t50\tISA_2\t0\t+\n")
+
+    assert read_is_copies(tmp_path / "is.bed", GROUPS, {"chr"}) == [
+        ISCopy("ISA_1", "grpA", "chr", 100, 900, "+"), ISCopy("ISB", "grpB", "chr", 2000, 2800, "-")]
+
+
+def test_part_of_a_sequence_is_placed_through_its_context(tmp_path):
+    # An IS segment is placed with the contig sequence around it, so identical copies are told apart
+    rng = random.Random(52)
+    chrom = "".join(rng.choice("ACGT") for _ in range(20000))
+    (tmp_path / "ref.fasta").write_text(f">chr\n{chrom}\n")
+    placer = GenePlacer(tmp_path / "ref.fasta")
+
+    assert placer.place_part(chrom[4000:7000].encode(), 1000, 2000) == [Placement("chr", 5000, 6000, "+", 1.0)]
+    assert placer.place_part(reverse_complement(chrom[4000:7000]).encode(), 1000, 2000) == [
+        Placement("chr", 5000, 6000, "-", 1.0)]
+    assert placer.lengths == {"chr": 20000}
