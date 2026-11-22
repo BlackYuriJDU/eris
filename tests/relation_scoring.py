@@ -363,6 +363,10 @@ TIERS = ('side', 'nearest', 'distance')
 AssignmentKey = tuple[str, str, str]  # (isoform group, side, eris gene id)
 FP_CAUSES = ('FP_unplaced', 'FP_overcall', 'FP_side', 'FP_group', 'FP_not_nearest')
 FN_CAUSES = ('FN_undetected', 'FN_side', 'FN_group', 'FN_budget', 'FN_unreported')
+# Which genes inside truth IS can be a copy's nearest gene (ADR 0005): `own_copy` leaves out only the genes inside the
+# copy itself, so in an adjacent pair each IS's transposase flanks the other, as in the curated truth (ADR 0002);
+# `any_copy` leaves out every gene inside any truth IS.
+UNIVERSES = ('own_copy', 'any_copy')
 
 
 @dataclass(frozen=True)
@@ -445,20 +449,26 @@ def side_distances(c: ISCopy, p: Placement, lengths: dict[str, int] | None = Non
     return {side: min(ds) for side, ds in zip(SIDES, (up, down)) if ds}
 
 
-def _universe(copies: list[ISCopy], genes: Iterable[str],
-              place: Callable[[str], list[Placement]]) -> dict[str, list[Placement]]:
-    """eris's placed genes, at their places outside every truth IS."""
-    universe = {}
+def _universe(copies: list[ISCopy], genes: Iterable[str], place: Callable[[str], list[Placement]],
+              universe: str = 'own_copy') -> dict[str, list[Placement]]:
+    """
+    eris's placed genes, at the places that can flank a copy. A gene inside a copy has no side of that copy anyway
+    (`side_distances`), so `own_copy` keeps every place and `any_copy` drops those inside any truth IS.
+    """
+    if universe not in UNIVERSES:
+        raise ValueError(f"universe must be one of {UNIVERSES}, not {universe!r}")
+    found = {}
     for gene in genes:
-        if placements := [p for p in place(gene) if not any(_inside(p, c) for c in copies)]:
-            universe[gene] = placements
-    return universe
+        if placements := [p for p in place(gene)
+                          if universe == 'own_copy' or not any(_inside(p, c) for c in copies)]:
+            found[gene] = placements
+    return found
 
 
 def expected_relations(copies: list[ISCopy], genes: Iterable[str], place: Callable[[str], list[Placement]],
-                       lengths: dict[str, int] | None = None) -> list[ExpectedRelation]:
+                       lengths: dict[str, int] | None = None, universe: str = 'own_copy') -> list[ExpectedRelation]:
     """The nearest of eris's genes on each side of each truth copy, merged per (group, side, gene)."""
-    return _expected(copies, _universe(copies, genes, place), lengths)
+    return _expected(copies, _universe(copies, genes, place, universe), lengths)
 
 
 def _expected(copies: list[ISCopy], universe: dict[str, list[Placement]],
@@ -506,6 +516,10 @@ class AssignmentScore:
         n = self.expected - self.undetected
         return self.recalled[tier] / n if n else 0.0
 
+    def f1(self, tier: str) -> float:
+        p, r = self.precision(tier), self.recall(tier)
+        return 2 * p * r / (p + r) if p + r else 0.0
+
     @property
     def band_agreement(self) -> float:
         return sum(self.band_agreements) / len(self.band_agreements) if self.band_agreements else 0.0
@@ -520,13 +534,15 @@ def _eris_band(relation: FeatureRelation) -> str:
 
 def score_assignment(copies: list[ISCopy], genes: Iterable[str], loci: list, groups: dict[str, str],
                      place: Callable[[str], list[Placement]], cover: Callable[[object], list[Placement]],
-                     reach_loci: list | None = None, lengths: dict[str, int] | None = None) -> AssignmentScore:
+                     reach_loci: list | None = None, lengths: dict[str, int] | None = None,
+                     universe: str = 'own_copy') -> AssignmentScore:
     """
     Scores how eris assigns its own genes to IS sides (#52). `genes` are the ids of every gene eris called, `place`
     returns a gene's reference placements, and `cover` the reference placements of a locus's IS segments.
-    `reach_loci` are the loci of a run with a larger hops budget, to tell budget misses apart.
+    `reach_loci` are the loci of a run with a larger hops budget, to tell budget misses apart. `universe` is one of
+    UNIVERSES.
     """
-    universe = _universe(copies, genes, place)
+    universe = _universe(copies, genes, place, universe)
     expected = _expected(copies, universe, lengths)
     by_gene: dict[str, list[ExpectedRelation]] = {}
     for e in expected:
@@ -605,7 +621,7 @@ def assignment_report(score: AssignmentScore) -> str:
     return "\n".join([
         "assignment of eris's own genes to IS sides (IS-detection errors excluded):",
         *(f"  {labels[t]:32} precision {score.precise[t]}/{first} = {score.precision(t):.3f}  "
-          f"recall {score.recalled[t]}/{expected} = {score.recall(t):.3f}" for t in TIERS),
+          f"recall {score.recalled[t]}/{expected} = {score.recall(t):.3f}  F1 {score.f1(t):.3f}" for t in TIERS),
         f"  distance on found relations: band agreement {score.band_agreement:.3f}, error median "
         f"{median(score.distance_errors) if score.distance_errors else 0} bp, "
         f"max {max(score.distance_errors, default=0)} bp",

@@ -214,6 +214,19 @@ def test_expected_relations_are_the_nearest_eris_gene_on_each_side_of_each_copy(
                         (("grpB", "downstream", "b_left"), frozenset({"b_left"}), frozenset({10}))}
 
 
+def test_a_neighbouring_copys_transposase_is_the_nearest_gene_of_an_adjacent_pair():
+    # ISA_1 and ISB_2 touch end to end; each one's transposase is the gene next to the other (ADR 0005)
+    b2 = copy("ISB_2", 11000, 12000)
+    place = placed(tnp_a=(10100, 10900), tnp_b=(11100, 11900), beyond=(12100, 13000))
+    genes = ["tnp_a", "tnp_b", "beyond"]
+    own = {e.key: e.distances for e in expected_relations([A1, b2], genes, place)}
+    any_copy = {e.key: e.distances for e in expected_relations([A1, b2], genes, place, universe="any_copy")}
+
+    assert own[("grpA", "downstream", "tnp_b")] == frozenset({100})
+    assert own[("grpB", "upstream", "tnp_a")] == frozenset({100})
+    assert ("grpA", "downstream", "beyond") in any_copy and not any(k[2].startswith("tnp") for k in any_copy)
+
+
 def test_expected_relations_wrap_around_a_circular_replicon():
     near_origin = copy("ISA_1", 500, 1500)
     place = placed(g_end=(99000, 99800), g_mid=(60000, 61000))
@@ -290,6 +303,7 @@ def test_tiers_add_nearest_then_distance():
     assert [score.precision(t) for t in ("side", "nearest", "distance")] == [1.0, 0.5, 0.0]
     assert [score.recall(t) for t in ("side", "nearest", "distance")] == [0.5, 0.5, 0.0]
     assert (score.band_agreement, score.distance_errors) == (0.0, [400])
+    assert [score.f1(t) for t in ("side", "nearest", "distance")] == [2 / 3, 0.5, 0.0]
 
 
 def test_side_tier_credits_every_flank_the_nearest_tier_credits():

@@ -488,26 +488,28 @@ def placer():
 _ERIS_RUNS = {}
 
 
-def run_eris_with_genes(genome_file: str, target_db, placer):
+def run_eris_with_genes(genome_file: str, target_db, placer, mode: str = 'collapse'):
     """
-    eris's loci at RELATION_HOPS and REACH_HOPS, every gene it called, and a cached `place` for them; computed once
-    per assembly for the relation and assignment benchmarks.
+    eris's loci at RELATION_HOPS and REACH_HOPS in one resolution mode, every gene it called, and a cached `place` for
+    them; computed once per assembly and mode for the relation and assignment benchmarks. Gene calls depend on neither
+    the hops budget nor the mode, so both modes share the genes and their placements.
     """
     if genome_file not in _ERIS_RUNS:
-        genome = GenomeAssembly.from_file(DATA_DIR / genome_file)
-        runs, genes = {}, GeneSequences()  # gene calls do not depend on the hops budget
-        for hops in (RELATION_HOPS, REACH_HOPS):
-            with Pipeline(target_db, max_feature_hops=hops, mode='collapse', min_coverage=0.30) as pipeline:
-                runs[hops] = list(pipeline(genome, genes))
-        placements = {}
+        genes, placements = GeneSequences(), {}
 
         def place(gene_id):
             if gene_id not in placements:
                 placements[gene_id] = placer.place(genes.by_id[gene_id])
             return placements[gene_id]
 
-        _ERIS_RUNS[genome_file] = genome, runs, genes, place
-    return _ERIS_RUNS[genome_file]
+        _ERIS_RUNS[genome_file] = GenomeAssembly.from_file(DATA_DIR / genome_file), {}, genes, place
+    genome, runs_by_mode, genes, place = _ERIS_RUNS[genome_file]
+    if mode not in runs_by_mode:
+        runs = runs_by_mode[mode] = {}
+        for hops in (RELATION_HOPS, REACH_HOPS):
+            with Pipeline(target_db, max_feature_hops=hops, mode=mode, min_coverage=0.30) as pipeline:
+                runs[hops] = list(pipeline(genome, genes))
+    return genome, runs_by_mode[mode], genes, place
 
 
 @pytest.fixture(scope="module", params=RELATION_BENCHMARKS)
@@ -558,30 +560,37 @@ ASSIGNMENT_BENCHMARKS = {
 }
 IS_CONTEXT = 1000  # bp of contig either side of an IS segment, so its placement tells identical copies apart
 
-# Every assignment error, as {((isoform group, side, eris gene), cause)}. A new error fails, and so does a fixed one or
-# one whose cause changes, until this table is updated. On the complete genome every error is eris's: IS609_1 read on
-# the wrong strand (FP/FN_side); adjacent IS pairs (IS30+ISSd1, ISEcp1+IS5, ISSd1+ISEc52, IS26+ISEcp1) reported as one
-# locus named after its first IS, so the second is FN_undetected and its flank goes to the first (FP_group);
-# ISSen1 and ISSen10 not found, and ISEc49 called where the BED has no IS; ISCfr4's alignment stops 119 bp short, so a
-# piece of its own transposase is reported as a flank (FP_not_nearest).
+# Every assignment error per (assembly, resolution mode), as {((isoform group, side, eris gene), cause)}, scored with
+# the own_copy universe (ADR 0005). A new error fails, and so does a fixed one or one whose cause changes, until this
+# table is updated. On the complete genome every error is eris's: IS609_1 read on the wrong strand (FP/FN_side);
+# adjacent IS pairs (IS30+ISSd1, ISEcp1+IS5, ISSd1+ISEc52, IS26+ISEcp1) reported as one locus named after its first IS,
+# so the second is FN_undetected, its flank goes to the first (FP_group), and the first misses its neighbour's
+# transposase, its nearest gene on that side; ISSen1 and ISSen10 not found, and ISEc49 called where the BED has no IS;
+# ISCfr4's alignment stops 119 bp short, so a piece of its own transposase is reported as a flank (FP_not_nearest).
 KNOWN_ASSIGNMENT_ERRORS = {
-    "complete": {
+    ("complete", "collapse"): {
+        (("IS26", "downstream", "HG941719.1_37300_38562"), "FN_budget"),
+        (("IS30", "downstream", "HG941718.1_3314442_3315260"), "FN_group"),
         (("IS609", "downstream", "HG941718.1_2104066_2104614"), "FN_side"),
         (("IS609", "upstream", "HG941718.1_2103359_2103856"), "FN_side"),
-        (("IS5", "downstream", "HG941718.1_4935996_4937339"), "FN_undetected"),
+        (("IS5", "downstream", "HG941718.1_4937619_4938881"), "FN_undetected"),
         (("IS5", "upstream", "HG941718.1_4940069_4940200"), "FN_undetected"),
         (("IS600", "downstream", "HG941718.1_3315272_3315727"), "FN_undetected"),
-        (("IS600", "upstream", "HG941718.1_3312881_3313249"), "FN_undetected"),
+        (("IS600", "upstream", "HG941718.1_3313323_3314357"), "FN_undetected"),
         (("ISEc52", "downstream", "HG941718.1_4944364_4944777"), "FN_undetected"),
         (("ISEc52", "upstream", "HG941718.1_4943602_4944198"), "FN_undetected"),
-        (("ISEc9", "downstream", "HG941719.1_33777_36305"), "FN_undetected"),
+        (("ISEc9", "downstream", "HG941719.1_102501_103217"), "FN_undetected"),
         (("ISEc9", "upstream", "HG941719.1_38750_38980"), "FN_undetected"),
         (("ISSen1", "downstream", "HG941718.1_4977172_4977423"), "FN_undetected"),
         (("ISSen1", "upstream", "HG941718.1_4976210_4976368"), "FN_undetected"),
         (("ISSen10", "downstream", "HG941718.1_4155982_4156059"), "FN_undetected"),
         (("ISSen10", "upstream", "HG941718.1_4156672_4158180"), "FN_undetected"),
         (("IS600", "upstream", "HG941718.1_4943602_4944198"), "FN_unreported"),
+        (("ISEc9", "downstream", "HG941718.1_4939087_4940067"), "FN_unreported"),
+        (("IS26", "downstream", "HG941719.1_38750_38980"), "FP_group"),
+        (("IS30", "downstream", "HG941718.1_3315272_3315727"), "FP_group"),
         (("IS600", "upstream", "HG941718.1_4944364_4944777"), "FP_group"),
+        (("ISEc9", "downstream", "HG941718.1_4940069_4940200"), "FP_group"),
         (("ISCfr4", "downstream", "HG941718.1_1365823_1366380"), "FP_not_nearest"),
         (("ISEc49", "downstream", "HG941718.1_4160353_4160985"), "FP_overcall"),
         (("ISEc49", "downstream", "HG941718.1_4161807_4162394"), "FP_overcall"),
@@ -590,18 +599,17 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("IS609", "downstream", "HG941718.1_2103359_2103856"), "FP_side"),
         (("IS609", "upstream", "HG941718.1_2104066_2104614"), "FP_side"),
     },
-    "fragmented": {
+    ("fragmented", "collapse"): {
         (("ISEc12", "upstream", "1243278_59_1681"), "FN_budget"),
         (("ISEc12", "upstream", "1244912_33_491"), "FN_budget"),
-        (("IS30", "downstream", "1242486_319_774"), "FN_group"),
         (("IS600", "downstream", "1242486_319_774"), "FN_group"),
         (("IS600", "upstream", "1206755_158_400"), "FN_group"),
-        (("IS600", "upstream", "1228204_3_239"), "FN_group"),
+        (("IS600", "upstream", "1242602_126_1277"), "FN_group"),
         (("ISEc22", "upstream", "1244674_144_1244"), "FN_group"),
         (("ISEc52", "upstream", "1206755_158_400"), "FN_group"),
         (("IS609", "downstream", "1244458_193_717"), "FN_side"),
         (("IS3411", "downstream", "1245106_115_594"), "FN_undetected"),
-        (("IS5", "downstream", "1245048_8486_9829"), "FN_undetected"),
+        (("IS5", "downstream", "1245048_10109_11371"), "FN_undetected"),
         (("IS5", "upstream", "1245048_12559_12690"), "FN_undetected"),
         (("ISSen1", "downstream", "1245024_2279_2530"), "FN_undetected"),
         (("ISSen1", "upstream", "1245024_1317_1475"), "FN_undetected"),
@@ -620,8 +628,10 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("ISEc23", "downstream", "1243458_2550_2825"), "FN_unreported"),
         (("ISEc23", "upstream", "1245118_80_268"), "FN_unreported"),
         (("ISEc52", "downstream", "1244890_87_500"), "FN_unreported"),
+        (("ISEc9", "downstream", "1245048_11577_12557"), "FN_unreported"),
         (("IS3411", "downstream", "1245106_3322_3399"), "FP_group"),
         (("IS3411", "upstream", "1245106_1201_2709"), "FP_group"),
+        (("ISEc9", "downstream", "1245048_12559_12690"), "FP_group"),
         (("IS1A", "downstream", "1208153_1_267"), "FP_not_nearest"),
         (("IS1A", "upstream", "1171599_3_173"), "FP_not_nearest"),
         (("IS30", "downstream", "1242602_3_80"), "FP_not_nearest"),
@@ -640,7 +650,58 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("IS30", "upstream", "1242602_1299_1439"), "FP_unplaced"),
         (("ISEc22", "upstream", "1240608_1_192"), "FP_unplaced"),
     },
-    "real": {
+    ("fragmented", "variant"): {
+        (("ISEc12", "upstream", "1244912_33_491"), "FN_budget"),
+        (("IS30", "downstream", "1243758_2_889"), "FN_group"),
+        (("IS30", "upstream", "1228204_3_239"), "FN_group"),
+        (("ISEc52", "upstream", "1206755_158_400"), "FN_group"),
+        (("ISEc8", "upstream", "1245098_660_788"), "FN_group"),
+        (("ISEch14", "upstream", "1135873_2_76"), "FN_group"),
+        (("IS609", "downstream", "1244458_193_717"), "FN_side"),
+        (("IS3411", "downstream", "1245106_115_594"), "FN_undetected"),
+        (("IS3411", "upstream", "1244656_358_903"), "FN_undetected"),
+        (("IS5", "downstream", "1245048_10109_11371"), "FN_undetected"),
+        (("IS5", "upstream", "1245048_12559_12690"), "FN_undetected"),
+        (("ISSen1", "downstream", "1245024_2279_2530"), "FN_undetected"),
+        (("ISSen1", "upstream", "1245024_1317_1475"), "FN_undetected"),
+        (("ISSen10", "downstream", "1245106_3322_3399"), "FN_undetected"),
+        (("ISSen10", "upstream", "1245106_1201_2709"), "FN_undetected"),
+        (("IS1397", "upstream", "1244964_169_1179"), "FN_unreported"),
+        (("IS1A", "downstream", "1245038_98887_99339"), "FN_unreported"),
+        (("IS1A", "upstream", "1245046_511492_512118"), "FN_unreported"),
+        (("IS1X1", "upstream", "1245106_18250_18561"), "FN_unreported"),
+        (("IS609", "upstream", "1244578_149_646"), "FN_unreported"),
+        (("IS609", "upstream", "1244764_135242_135442"), "FN_unreported"),
+        (("ISEc23", "upstream", "1245118_80_268"), "FN_unreported"),
+        (("ISEc9", "downstream", "1245048_11577_12557"), "FN_unreported"),
+        (("IS3411", "downstream", "1245106_3322_3399"), "FP_group"),
+        (("IS3411", "upstream", "1245106_1201_2709"), "FP_group"),
+        (("IS600", "downstream", "1228204_3_239"), "FP_group"),
+        (("IS600", "upstream", "1243600_2_142"), "FP_group"),
+        (("ISEc9", "downstream", "1245048_12559_12690"), "FP_group"),
+        (("IS1A", "downstream", "1208153_1_267"), "FP_not_nearest"),
+        (("IS30", "downstream", "1242602_3_80"), "FP_not_nearest"),
+        (("IS3411", "upstream", "1243600_18631_18927"), "FP_not_nearest"),
+        (("IS600", "upstream", "1206755_2_142"), "FP_not_nearest"),
+        (("IS600", "upstream", "1243600_194_367"), "FP_not_nearest"),
+        (("ISCfr4", "downstream", "1245002_71591_72175"), "FP_not_nearest"),
+        (("ISEc22", "upstream", "1234604_3_221"), "FP_not_nearest"),
+        (("ISEc8", "upstream", "1242486_1_270"), "FP_not_nearest"),
+        (("ISEch14", "upstream", "1152800_3_185"), "FP_not_nearest"),
+        (("ISEc49", "downstream", "1244656_1061_1693"), "FP_overcall"),
+        (("ISEc49", "downstream", "1244656_2515_3102"), "FP_overcall"),
+        (("ISEc49", "upstream", "1244656_1816_2199"), "FP_overcall"),
+        (("ISEc49", "upstream", "1244656_4153_4740"), "FP_overcall"),
+        (("IS609", "upstream", "1244458_193_717"), "FP_side"),
+        (("IS1A", "upstream", "1203713_200_292"), "FP_unplaced"),
+        (("IS1X1", "upstream", "1244890_8881_8946"), "FP_unplaced"),
+        (("IS30", "upstream", "1242602_1299_1439"), "FP_unplaced"),
+        (("ISEc52", "downstream", "1245024_32451_32558"), "FP_unplaced"),
+        (("ISEc8", "downstream", "1240608_1_192"), "FP_unplaced"),
+        (("ISEch14", "upstream", "1227020_39_221"), "FP_unplaced"),
+        (("ISEch14", "upstream", "1242602_1299_1439"), "FP_unplaced"),
+    },
+    ("real", "collapse"): {
         (("IS1X1", "downstream", "2420468_1_114"), "FN_group"),
         (("IS1X1", "upstream", "2419496_15007_15318"), "FN_group"),
         (("IS26", "downstream", "2418527_1611_2303"), "FN_group"),
@@ -656,13 +717,12 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("IS26", "upstream", "2421014_5513_7786"), "FN_group"),
         (("IS26", "upstream", "2421078_21711_22349"), "FN_group"),
         (("IS26", "upstream", "2421282_2_82"), "FN_group"),
-        (("IS30", "downstream", "2418702_3_533"), "FN_group"),
+        (("IS30", "downstream", "2409810_2_889"), "FN_group"),
         (("IS3411", "downstream", "2402724_2564_2779"), "FN_group"),
         (("IS3411", "downstream", "2417355_1_207"), "FN_group"),
         (("IS3411", "upstream", "2419478_533_709"), "FN_group"),
-        (("IS5", "downstream", "2420376_165_1508"), "FN_group"),
         (("IS600", "downstream", "2418702_3_533"), "FN_group"),
-        (("IS600", "upstream", "2396236_3_239"), "FN_group"),
+        (("IS600", "upstream", "2418794_86_1237"), "FN_group"),
         (("ISEc12", "downstream", "2339717_2_106"), "FN_group"),
         (("ISEc22", "upstream", "2420294_104_1204"), "FN_group"),
         (("ISEc23", "downstream", "2420362_10091_10168"), "FN_group"),
@@ -672,7 +732,7 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("ISEc52", "downstream", "2420282_1_237"), "FN_group"),
         (("ISEc52", "upstream", "2416971_22_225"), "FN_group"),
         (("ISEc8", "downstream", "2409674_277_384"), "FN_group"),
-        (("ISEc9", "downstream", "2418768_1199_1330"), "FN_group"),
+        (("ISEc9", "downstream", "2418768_217_1197"), "FN_group"),
         (("ISEch14", "upstream", "2315248_2_76"), "FN_group"),
         (("IS609", "downstream", "2419940_30823_31236"), "FN_side"),
         (("ISSen1", "downstream", "2420282_29992_30243"), "FN_undetected"),
@@ -695,13 +755,12 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("ISEc23", "downstream", "2419792_2510_2785"), "FN_unreported"),
         (("IS3411", "downstream", "2419496_1_495"), "FP_group"),
         (("IS3411", "downstream", "2420468_1_114"), "FP_group"),
+        (("ISEch14", "upstream", "2418794_86_1237"), "FP_group"),
         (("IS1A", "upstream", "2420366_56_256"), "FP_not_nearest"),
-        (("IS5", "downstream", "2404970_61_483"), "FP_not_nearest"),
         (("IS600", "upstream", "2419478_18524_18697"), "FP_not_nearest"),
         (("ISCfr4", "downstream", "2418565_61184_61768"), "FP_not_nearest"),
         (("ISEc8", "downstream", "2416727_262_477"), "FP_not_nearest"),
         (("ISEc8", "upstream", "2418702_582_809"), "FP_not_nearest"),
-        (("ISEch14", "upstream", "2418794_86_1237"), "FP_not_nearest"),
         (("ISEc49", "downstream", "2419876_7802_8389"), "FP_overcall"),
         (("ISEc49", "downstream", "2419876_9211_9843"), "FP_overcall"),
         (("ISEc49", "upstream", "2419876_6209_6751"), "FP_overcall"),
@@ -715,17 +774,95 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("ISEc52", "downstream", "2367790_1_129"), "FP_unplaced"),
         (("ISEch14", "upstream", "2417307_37_138"), "FP_unplaced"),
     },
+    ("real", "variant"): {
+        (("IS1397", "upstream", "2420246_11_181"), "FN_group"),
+        (("IS26", "upstream", "2412009_2_505"), "FN_group"),
+        (("IS26", "upstream", "2421014_5513_7786"), "FN_group"),
+        (("IS26", "upstream", "2421078_21711_22349"), "FN_group"),
+        (("IS30", "downstream", "2409810_2_889"), "FN_group"),
+        (("IS30", "upstream", "2396236_3_239"), "FN_group"),
+        (("IS5", "downstream", "2404970_61_483"), "FN_group"),
+        (("IS609", "upstream", "2419948_17153_17650"), "FN_group"),
+        (("IS609", "upstream", "2421278_133398_135122"), "FN_group"),
+        (("ISEc12", "upstream", "2420380_1_165"), "FN_group"),
+        (("ISEc22", "downstream", "2421266_62_445"), "FN_group"),
+        (("ISEc22", "upstream", "2420294_104_1204"), "FN_group"),
+        (("ISEc23", "downstream", "2419792_2510_2785"), "FN_group"),
+        (("ISEc23", "downstream", "2420362_10091_10168"), "FN_group"),
+        (("ISEc23", "downstream", "2420376_8630_9643"), "FN_group"),
+        (("ISEc23", "upstream", "2420074_39_434"), "FN_group"),
+        (("ISEc23", "upstream", "2421212_6881_8077"), "FN_group"),
+        (("ISEc52", "upstream", "2416971_22_225"), "FN_group"),
+        (("ISEch14", "upstream", "2315248_2_76"), "FN_group"),
+        (("IS26", "downstream", "2419936_10176_11081"), "FN_side"),
+        (("IS26", "downstream", "2420268_803_1522"), "FN_side"),
+        (("IS26", "upstream", "2418902_4830_5795"), "FN_side"),
+        (("IS609", "downstream", "2419940_30823_31236"), "FN_side"),
+        (("ISSen1", "downstream", "2420282_29992_30243"), "FN_undetected"),
+        (("ISSen1", "upstream", "2420282_31047_31205"), "FN_undetected"),
+        (("ISSen10", "downstream", "2419496_1_495"), "FN_undetected"),
+        (("ISSen10", "upstream", "2402724_449_1957"), "FN_undetected"),
+        (("IS3411", "downstream", "2419496_1_495"), "FP_group"),
+        (("IS3411", "downstream", "2420468_1_114"), "FP_group"),
+        (("IS3411", "upstream", "2402724_449_1957"), "FP_group"),
+        (("IS600", "downstream", "2396236_3_239"), "FP_group"),
+        (("IS1A", "downstream", "2420860_1_267"), "FP_not_nearest"),
+        (("IS1A", "downstream", "2421038_1149_1973"), "FP_not_nearest"),
+        (("IS1A", "upstream", "2421282_8525_8911"), "FP_not_nearest"),
+        (("IS1X1", "upstream", "2419948_223_771"), "FP_not_nearest"),
+        (("IS1X1", "upstream", "2420100_922_1974"), "FP_not_nearest"),
+        (("IS30", "downstream", "2421274_220935_221555"), "FP_not_nearest"),
+        (("IS3411", "downstream", "2395472_3_509"), "FP_not_nearest"),
+        (("IS3411", "upstream", "2264833_1_132"), "FP_not_nearest"),
+        (("IS3411", "upstream", "2419478_1000_1746"), "FP_not_nearest"),
+        (("IS3411", "upstream", "2420316_3_260"), "FP_not_nearest"),
+        (("IS5", "downstream", "2421268_10430_10558"), "FP_not_nearest"),
+        (("IS600", "upstream", "2419478_14224_14310"), "FP_not_nearest"),
+        (("IS600", "upstream", "2419478_18524_18697"), "FP_not_nearest"),
+        (("ISCfr4", "downstream", "2418565_61184_61768"), "FP_not_nearest"),
+        (("ISEc22", "upstream", "2419648_1770_3395"), "FP_not_nearest"),
+        (("ISEc23", "downstream", "2419876_9211_9843"), "FP_not_nearest"),
+        (("ISEc8", "downstream", "2394944_2_682"), "FP_not_nearest"),
+        (("ISEc8", "downstream", "2416727_262_477"), "FP_not_nearest"),
+        (("ISEc8", "upstream", "2418702_582_809"), "FP_not_nearest"),
+        (("ISEc9", "downstream", "2420354_947_2092"), "FP_not_nearest"),
+        (("ISEc9", "upstream", "2420376_1571_2848"), "FP_not_nearest"),
+        (("ISEch14", "upstream", "2419968_1515_2561"), "FP_not_nearest"),
+        (("ISEc49", "downstream", "2419876_7802_8389"), "FP_overcall"),
+        (("ISEc49", "downstream", "2419876_9211_9843"), "FP_overcall"),
+        (("ISEc49", "upstream", "2419876_6209_6751"), "FP_overcall"),
+        (("ISEc49", "upstream", "2419876_8705_9088"), "FP_overcall"),
+        (("IS609", "upstream", "2419940_30823_31236"), "FP_side"),
+        (("IS1A", "downstream", "2421094_3_137"), "FP_unplaced"),
+        (("IS1X1", "downstream", "1197139_2_91"), "FP_unplaced"),
+        (("IS1X1", "downstream", "2059700_2_142"), "FP_unplaced"),
+        (("IS1X1", "downstream", "2368768_2_142"), "FP_unplaced"),
+        (("IS200", "upstream", "2421038_99231_99353"), "FP_unplaced"),
+        (("IS26", "downstream", "2418902_5828_5998"), "FP_unplaced"),
+        (("IS26", "upstream", "2421180_2_139"), "FP_unplaced"),
+        (("IS30", "upstream", "2418794_1259_1360"), "FP_unplaced"),
+        (("IS3411", "upstream", "2393385_1_87"), "FP_unplaced"),
+        (("ISEc12", "downstream", "161047_2_70"), "FP_unplaced"),
+        (("ISEc22", "downstream", "2416987_1003_1071"), "FP_unplaced"),
+        (("ISEc52", "downstream", "2367790_1_129"), "FP_unplaced"),
+    },
 }
+# A complete genome has no graph, so variant mode reports the same loci as collapse mode
+KNOWN_ASSIGNMENT_ERRORS["complete", "variant"] = KNOWN_ASSIGNMENT_ERRORS["complete", "collapse"]
 
 
-@pytest.fixture(scope="module", params=ASSIGNMENT_BENCHMARKS)
+ASSIGNMENT_RUNS = [(name, mode) for name in ASSIGNMENT_BENCHMARKS for mode in ('collapse', 'variant')]
+
+
+@pytest.fixture(scope="module", params=ASSIGNMENT_RUNS, ids=[f"{n}-{m}" for n, m in ASSIGNMENT_RUNS])
 def assignment_benchmark(request, target_db, isoform_groups, placer):
-    genome_file, bed, replicons = ASSIGNMENT_BENCHMARKS[request.param]
+    name, mode = request.param
+    genome_file, bed, replicons = ASSIGNMENT_BENCHMARKS[name]
     # Only the BED is needed, not the curated relation table, so real reads can be scored too
     missing = [f for f in (DATA_DIR / "IS.mmi", REFERENCE, DATA_DIR / genome_file, DATA_DIR / bed) if not f.exists()]
     if missing:
         pytest.skip(f"assignment benchmark data not found: {missing}")
-    genome, runs, genes, place = run_eris_with_genes(genome_file, target_db, placer)
+    genome, runs, genes, place = run_eris_with_genes(genome_file, target_db, placer, mode)
 
     def cover(locus):
         group = group_of(locus.targets[0].id, isoform_groups)
@@ -738,13 +875,18 @@ def assignment_benchmark(request, target_db, isoform_groups, placer):
         return placements
 
     copies = read_is_copies(DATA_DIR / bed, isoform_groups, replicons)
-    score = score_assignment(copies, genes.by_id, runs[RELATION_HOPS], isoform_groups, place, cover,
-                             reach_loci=runs[REACH_HOPS], lengths=placer.lengths)
-    print(f"\n{request.param}:\n{assignment_report(score)}")
-    return request.param, score
+    args = (copies, genes.by_id, runs[RELATION_HOPS], isoform_groups, place, cover)
+    kwargs = dict(reach_loci=runs[REACH_HOPS], lengths=placer.lengths)
+    score = score_assignment(*args, **kwargs)
+    # The any_copy universe is printed beside the headline, for comparison with other scorers, but not ratcheted
+    other = score_assignment(*args, **kwargs, universe='any_copy')
+    print(f"\n{name}, {mode} mode:\n{assignment_report(score)}\n  any_copy universe, side + nearest: "
+          f"precision {other.precision('nearest'):.3f}  recall {other.recall('nearest'):.3f}  "
+          f"F1 {other.f1('nearest'):.3f}")
+    return (name, mode), score
 
 
 @pytest.mark.slow
 def test_assignment_errors_do_not_change(assignment_benchmark):
-    name, score = assignment_benchmark
-    assert_unchanged(score.errors, KNOWN_ASSIGNMENT_ERRORS[name], "KNOWN_ASSIGNMENT_ERRORS")
+    run, score = assignment_benchmark
+    assert_unchanged(score.errors, KNOWN_ASSIGNMENT_ERRORS[run], "KNOWN_ASSIGNMENT_ERRORS")
