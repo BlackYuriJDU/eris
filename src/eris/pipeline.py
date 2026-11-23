@@ -232,7 +232,7 @@ class LocusBuilder:
     identifies flanking and passenger genes for each identified locus.
     """
     __slots__ = ('topology_engine', 'genome', 'target_feature_type', 'max_feature_hops',
-                 'locus_tolerance', 'features', 'genes', 'max_flank_distance')
+                 'locus_tolerance', 'features', 'genes', 'max_flank_distance', 'alignments')
 
     def __init__(self, topology_engine: 'TopologyEngine', genome: 'GenomeAssembly',
                  target_feature_type: FeatureType = FeatureType.CDS,
@@ -262,6 +262,7 @@ class LocusBuilder:
         self.features = features or {}
         self.genes = genes or {}
         self.max_flank_distance = max_flank_distance
+        self.alignments: dict[str, AlignmentBatch] = {}
 
     def assemble(self, alignments: dict, min_coverage: float = 0.30, min_identity: float = 0.0) -> Iterable['Locus']:
         """
@@ -273,6 +274,8 @@ class LocusBuilder:
         kept or dropped on its pooled target identity.
         """
 
+        # The real alignments, before stitching adds synthetic records: a hub's branches are measured from them (#65)
+        self.alignments = alignments
         # Now expects a list of paths (lists of AlignmentRecords) instead of pairs
         cleaned_alignments, resolved_paths = self.topology_engine.resolve_split_alignments(alignments)
 
@@ -352,6 +355,27 @@ class LocusBuilder:
                                   if e.u == outer and (e.v, e.v_strand) != (end.t_name, end.strand * side)])
         return links_by_side[0], links_by_side[1]
 
+    def _target_past_link(self, e: Edge) -> int:
+        """
+        How far a copy's target runs onto a hub branch's first contig `e.v` past the overlap it shares with the hub
+        (#65), read along the walk: the furthest end of a real alignment that starts where the contig is entered,
+        within 10 bp. 0 if none does. The hub's edge is target end to end, so a copy carrying on past it starts in the
+        overlap; an alignment starting past it is another IS beside this one. Synthetic stitch records are left out:
+        they overshoot by one overlap.
+        """
+        batch = self.alignments.get(e.v)
+        if batch is None or not len(batch):
+            return 0
+        if e.v_strand == Strand.FORWARD:
+            starts, ends = batch.t_starts, batch.t_ends
+        else:
+            length = self.genome.contig_lengths[e.v]
+            starts, ends = length - batch.t_ends, length - batch.t_starts
+        entering = starts <= 10
+        if not entering.any():
+            return 0
+        return max(0, int(ends[entering].max()) - e.overlap)
+
     def _resolve_relation(self, contig: str, idx: int, interval_batch: 'IntervalBatch',
                           spatial: Context, dist: int, topo: int, target_strand: Strand,
                           target_bounds: tuple[int, int]) -> FeatureRelation:
@@ -419,7 +443,8 @@ class LocusBuilder:
         walks have already reported for this locus (see TopologyEngine.traverse); start a new one for each locus.
         Features further than `max_flank_distance` from the boundary are left out, wherever they lie (#55).
         `branch_links` are the other links leaving a repeat hub on this side, each walked as its own branch with the
-        full flank budget (#56); flanks along them are measured from the hub's edge, where the link leaves it.
+        full flank budget (#56); flanks along them are measured from where that branch's own copy of the target ends:
+        the hub's edge, where the link leaves it, plus any target the copy carries onto the branch's first contig (#65).
         The graph walk never enters a `blocked` contig. A gene across a link that runs back over the target's end is
         0 bp away and overlaps the target's start (upstream) or end (downstream), as a local gene would (#64).
         """
@@ -449,9 +474,10 @@ class LocusBuilder:
         # 2. Graph Spillover
         # The walk reads the contig along its direction from 0, so the boundary sits here in its coordinates
         walk_boundary = boundary if walk_direction == 1 else self.genome.contig_lengths[contig] - boundary
-        # The link's source contig, in the hub, is placed to end at the boundary, so a flank across the link is
-        # measured from the hub's edge
-        branches = [Branch(e, self.max_feature_hops, walk_boundary - self.genome.contig_lengths[e.u])
+        # The link's source contig, in the hub, is placed to end at the boundary, then pulled back by the target its
+        # copy carries onto the next contig, so a flank across the link is measured from that copy's end of the target
+        branches = [Branch(e, self.max_feature_hops,
+                           walk_boundary - self.genome.contig_lengths[e.u] - self._target_past_link(e))
                     for e in branch_links]
         if rem_hops > 0 or branches:
             reach = None if limit is None else walk_boundary + limit
