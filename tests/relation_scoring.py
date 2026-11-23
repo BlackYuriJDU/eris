@@ -506,6 +506,8 @@ class AssignmentScore:
     recalled: dict[str, int] = field(default_factory=lambda: dict.fromkeys(TIERS, 0))  # found relations per tier
     band_agreements: list[bool] = field(default_factory=list)  # one per found relation
     distance_errors: list[int] = field(default_factory=list)
+    # Found relations whose eris distance falls outside the reference's band, by the gene eris reports
+    band_errors: set[AssignmentKey] = field(default_factory=set)
     errors: set[tuple[AssignmentKey, str]] = field(default_factory=set)
 
     def precision(self, tier: str) -> float:
@@ -583,26 +585,34 @@ def score_assignment(copies: list[ISCopy], genes: Iterable[str], loci: list, gro
         else:
             score.errors.add((key, 'FP_not_nearest'))
 
-    reported = [(locus_group(locus, groups), f) for locus, flanks in per_locus for f in flanks]
+    covers = [cover(locus) for locus, _ in per_locus]
+    reported = [(i, locus_group(locus, groups), f) for i, (locus, flanks) in enumerate(per_locus) for f in flanks]
     reach_flanks = [f for locus in reach_loci or [] for f in read_flanks(locus, groups)]
     for e in expected:
-        of_group = [f for group, f in reported if group == e.group and f.relation.feature.id in e.genes]
-        on_side = [f.relation for f in of_group if f.side == e.side]
+        covering_loci = {i for i, (locus, _) in enumerate(per_locus) if locus_group(locus, groups) == e.group
+                    and any(_half_overlap(p, c) for p in covers[i] for c in e.copies)}
+        of_group = [(i, f) for i, group, f in reported if group == e.group and f.relation.feature.id in e.genes]
+        on_side = [(i, f.relation) for i, f in of_group if f.side == e.side]
         if on_side:
-            r = min(on_side, key=lambda r: (r.topological_dist, r.distance_bp))
+            # The distance is read off a locus covering one of the copies; another locus may report the same gene
+            # from a different copy, at that copy's distance
+            r = min([r for i, r in on_side if i in covering_loci] or [r for _, r in on_side],
+                    key=lambda r: (r.topological_dist, r.distance_bp))
             score.recalled['side'] += 1
             score.recalled['nearest'] += 1
-            score.recalled['distance'] += e.distance_band_agrees(r)
-            score.band_agreements.append(e.distance_band_agrees(r))
+            agrees = e.distance_band_agrees(r)
+            score.recalled['distance'] += agrees
+            score.band_agreements.append(agrees)
+            if not agrees:
+                score.band_errors.add((e.group, e.side, r.feature.id))
             score.distance_errors.append(e.distance_error(r))
             continue
-        if not any(_half_overlap(p, c) for locus, _ in per_locus if locus_group(locus, groups) == e.group
-                   for p in cover(locus) for c in e.copies):
+        if not covering_loci:
             score.undetected += 1
             cause = 'FN_undetected'
         elif of_group:
             cause = 'FN_side'
-        elif any(f.relation.feature.id in e.genes for _, f in reported):
+        elif any(f.relation.feature.id in e.genes for _, _, f in reported):
             cause = 'FN_group'
         elif any(f.group == e.group and f.side == e.side and f.relation.feature.id in e.genes for f in reach_flanks):
             cause = 'FN_budget'
@@ -612,16 +622,21 @@ def score_assignment(copies: list[ISCopy], genes: Iterable[str], loci: list, gro
     return score
 
 
-def assignment_report(score: AssignmentScore) -> str:
-    """The three tiers, the errors by cause, and each error, for the test log."""
+def tier_table(score: AssignmentScore) -> list[str]:
+    """Precision, recall and F1 of each tier, one line each."""
     first, expected = score.first_flanks - score.overcalls, score.expected - score.undetected
     labels = {'side': 'side', 'nearest': 'side + nearest (headline)', 'distance': 'side + nearest + distance band'}
+    return [f"  {labels[t]:32} precision {score.precise[t]}/{first} = {score.precision(t):.3f}  "
+            f"recall {score.recalled[t]}/{expected} = {score.recall(t):.3f}  F1 {score.f1(t):.3f}" for t in TIERS]
+
+
+def assignment_report(score: AssignmentScore) -> str:
+    """The three tiers, the errors by cause, each error and each band disagreement, for the test log."""
     errors = sorted(score.errors, key=lambda e: (e[1], e[0]))
     causes = score.causes()
     return "\n".join([
         "assignment of eris's own genes to IS sides (IS-detection errors excluded):",
-        *(f"  {labels[t]:32} precision {score.precise[t]}/{first} = {score.precision(t):.3f}  "
-          f"recall {score.recalled[t]}/{expected} = {score.recall(t):.3f}  F1 {score.f1(t):.3f}" for t in TIERS),
+        *tier_table(score),
         f"  distance on found relations: band agreement {score.band_agreement:.3f}, error median "
         f"{median(score.distance_errors) if score.distance_errors else 0} bp, "
         f"max {max(score.distance_errors, default=0)} bp",
@@ -631,4 +646,6 @@ def assignment_report(score: AssignmentScore) -> str:
         "  FP by cause: " + ", ".join(f"{c} {causes[c]}" for c in FP_CAUSES),
         "  FN by cause: " + ", ".join(f"{c} {causes[c]}" for c in FN_CAUSES),
         *(f"    {cause:15} {key}" for key, cause in errors),
+        f"  distance band disagreements: {len(score.band_errors)}",
+        *(f"    {key}" for key in sorted(score.band_errors)),
     ])

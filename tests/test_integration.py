@@ -9,7 +9,7 @@ from eris.constants import FeatureType
 from eris.copy_number import CopyNumber
 from isoforms import read_isoform_groups
 from relation_scoring import (GenePlacer, assignment_report, group_of, read_is_copies, read_truth, report,
-                              score_assignment, score_relations)
+                              score_assignment, score_relations, tier_table)
 
 DATA_DIR = Path("data")
 
@@ -762,6 +762,94 @@ KNOWN_ASSIGNMENT_ERRORS = {
 # A complete genome has no graph, so variant mode reports the same loci as collapse mode
 KNOWN_ASSIGNMENT_ERRORS["complete", "variant"] = KNOWN_ASSIGNMENT_ERRORS["complete", "collapse"]
 
+# Every distance band disagreement per (assembly, resolution mode), as {(isoform group, side, eris gene)}, over the
+# found relations scored with the own_copy universe; each one's distance is read off a locus covering its copy. A new
+# disagreement fails, and so does one that now agrees, until this table is updated. Some stay for good: the BED's IS
+# ends do not match where the database IS aligns for ISEc12 (60-72 bp inside), ISCfr4 (30 and 119 bp) and ISEc22
+# (47 bp), the complete genome's every disagreement, and for IS200 and ISSd1/IS600 (38-95 bp).
+KNOWN_DISTANCE_BAND_ERRORS = {
+    ("complete", "collapse"): {
+        ("ISCfr4", "downstream", "HG941718.1_1366518_1369175"),
+        ("ISEc12", "downstream", "HG941718.1_1482655_1482765"),
+        ("ISEc12", "upstream", "HG941718.1_3110278_3111900"),
+        ("ISEc12", "upstream", "HG941718.1_4971627_4971881"),
+        ("ISEc22", "upstream", "HG941718.1_3335446_3336546"),
+    },
+    ("fragmented", "collapse"): {
+        ("IS1397", "downstream", "1244458_31425_31544"),
+        ("IS1A", "downstream", "1236016_212_325"),
+        ("IS1A", "downstream", "1245038_98887_99339"),
+        ("IS1A", "upstream", "1244936_3024_3293"),
+        ("IS1A", "upstream", "1245046_511492_512118"),
+        ("IS1X1", "downstream", "1244320_2879_2998"),
+        ("IS1X1", "upstream", "1244890_8785_8865"),
+        ("IS1X1", "upstream", "1245106_18250_18561"),
+        ("IS200", "downstream", "1244018_138_395"),
+        ("IS30", "upstream", "1228204_3_239"),
+        ("IS3411", "upstream", "1243600_18433_18540"),
+        ("IS3411", "upstream", "1244656_358_903"),
+        ("IS600", "downstream", "1242486_319_774"),
+        ("IS600", "upstream", "1206755_158_400"),
+        ("IS609", "upstream", "1244764_135242_135442"),
+        ("ISCfr4", "downstream", "1245002_72313_74970"),
+        ("ISEc12", "upstream", "1243458_32_553"),
+        ("ISEc23", "downstream", "1243328_67_579"),
+        ("ISEc23", "upstream", "1244402_40_2199"),
+        ("ISEc23", "upstream", "1244758_98592_98987"),
+        ("ISEc8", "upstream", "1245098_660_788"),
+    },
+    ("fragmented", "variant"): {
+        ("IS1A", "downstream", "1236016_212_325"),
+        ("IS30", "upstream", "1228204_3_239"),
+        ("IS3411", "upstream", "1243600_18433_18540"),
+        ("IS600", "upstream", "1206755_158_400"),
+        ("ISCfr4", "downstream", "1245002_72313_74970"),
+        ("ISEc12", "downstream", "1242518_223_333"),
+        ("ISEc12", "upstream", "1233030_2_316"),
+        ("ISEc12", "upstream", "1243278_59_1681"),
+    },
+    ("real", "collapse"): {
+        ("IS1397", "upstream", "2420094_44316_44435"),
+        ("IS1397", "upstream", "2420246_11_181"),
+        ("IS1A", "downstream", "2420448_2_97"),
+        ("IS1A", "upstream", "2417355_2183_2452"),
+        ("IS1A", "upstream", "2418619_30_158"),
+        ("IS1A", "upstream", "2418902_177_434"),
+        ("IS1A", "upstream", "2421112_281686_282312"),
+        ("IS1X1", "downstream", "2420468_1_114"),
+        ("IS1X1", "upstream", "2419496_15007_15318"),
+        ("IS26", "downstream", "2418527_1611_2303"),
+        ("IS26", "downstream", "2418527_3_512"),
+        ("IS26", "upstream", "2420058_9832_12360"),
+        ("IS30", "upstream", "2396236_3_239"),
+        ("IS600", "downstream", "2418702_3_533"),
+        ("IS600", "upstream", "2416971_22_225"),
+        ("ISCfr4", "downstream", "2418565_61906_64563"),
+        ("ISEc12", "upstream", "2419792_1_513"),
+        ("ISEc23", "upstream", "2419950_528_2684"),
+        ("ISEc23", "upstream", "2420074_39_434"),
+        ("ISEc23", "upstream", "2421212_6881_8077"),
+        ("ISEc52", "downstream", "2420282_1_237"),
+        ("ISEc52", "upstream", "2420822_1_72"),
+        ("ISEc52", "upstream", "2421188_2_1168"),
+        ("ISEc8", "downstream", "2409674_277_384"),
+        ("ISEc9", "upstream", "2420676_4542_4760"),
+    },
+    ("real", "variant"): {
+        ("IS1A", "downstream", "2420448_1187_1312"),
+        ("IS26", "downstream", "2418527_3_512"),
+        ("IS30", "upstream", "2396236_3_239"),
+        ("IS600", "upstream", "2416971_22_225"),
+        ("ISCfr4", "downstream", "2418565_61906_64563"),
+        ("ISEc12", "downstream", "2339717_2_106"),
+        ("ISEc12", "upstream", "2418533_19_1641"),
+        ("ISEc12", "upstream", "2419806_290_739"),
+        ("ISEc23", "upstream", "2419950_528_2684"),
+    },
+}
+# As for KNOWN_ASSIGNMENT_ERRORS, variant mode reports the same loci on a complete genome
+KNOWN_DISTANCE_BAND_ERRORS["complete", "variant"] = KNOWN_DISTANCE_BAND_ERRORS["complete", "collapse"]
+
 
 ASSIGNMENT_RUNS = [(name, mode) for name in ASSIGNMENT_BENCHMARKS for mode in ('collapse', 'variant')]
 
@@ -792,9 +880,8 @@ def assignment_benchmark(request, target_db, isoform_groups, placer):
     score = score_assignment(*args, **kwargs)
     # The any_copy universe is printed beside the headline, for comparison with other scorers, but not ratcheted
     other = score_assignment(*args, **kwargs, universe='any_copy')
-    print(f"\n{name}, {mode} mode:\n{assignment_report(score)}\n  any_copy universe, side + nearest: "
-          f"precision {other.precision('nearest'):.3f}  recall {other.recall('nearest'):.3f}  "
-          f"F1 {other.f1('nearest'):.3f}")
+    print(f"\n{name}, {mode} mode:\n{assignment_report(score)}\n  any_copy universe:")
+    print("\n".join(tier_table(other)))
     return (name, mode), score
 
 
@@ -802,3 +889,9 @@ def assignment_benchmark(request, target_db, isoform_groups, placer):
 def test_assignment_errors_do_not_change(assignment_benchmark):
     run, score = assignment_benchmark
     assert_unchanged(score.errors, KNOWN_ASSIGNMENT_ERRORS[run], "KNOWN_ASSIGNMENT_ERRORS")
+
+
+@pytest.mark.slow
+def test_assignment_distance_bands_do_not_change(assignment_benchmark):
+    run, score = assignment_benchmark
+    assert_unchanged(score.band_errors, KNOWN_DISTANCE_BAND_ERRORS[run], "KNOWN_DISTANCE_BAND_ERRORS")
