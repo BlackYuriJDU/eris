@@ -315,8 +315,11 @@ class LocusBuilder:
 
     def _extract_flanks(self, contig: str, boundary: int, walk_direction: int,
                         context: Context, intervals: Optional['IntervalBatch'], dest_list: list,
-                        target_strand: Strand, target_bounds: tuple[int, int]):
-        """Walks the contig (and graph) from a boundary to find flanking features."""
+                        target_strand: Strand, target_bounds: tuple[int, int], claimed: set[tuple[str, int]]):
+        """
+        Walks the contig (and graph) from a boundary to find flanking features. `claimed` holds the genes the graph
+        walks have already reported for this locus (see TopologyEngine.traverse); start a new one for each locus.
+        """
         rem_hops = self.max_feature_hops
         exit_strand = Strand.REVERSE if walk_direction == -1 else Strand.FORWARD
 
@@ -339,7 +342,7 @@ class LocusBuilder:
 
         # 2. Graph Spillover
         if rem_hops > 0:
-            for s_ctg, node_depth, batch in self.topology_engine.traverse(contig, exit_strand, rem_hops):
+            for s_ctg, node_depth, batch in self.topology_engine.traverse(contig, exit_strand, rem_hops, claimed):
                 across_origin = s_ctg == contig and contig in self.topology_engine.circular
                 for i in range(len(batch)):
                     if across_origin and not self._before_target_across_origin(
@@ -402,10 +405,11 @@ class LocusBuilder:
                 u_dir, u_bound = -1, macro.start
                 d_dir, d_bound = 1, macro.end
 
+            claimed: set[tuple[str, int]] = set()
             self._extract_flanks(contig, u_bound, u_dir, Context.UPSTREAM, gene_intervals, locus.upstream_flanks,
-                                 primary_strand, macro_bounds)
+                                 primary_strand, macro_bounds, claimed)
             self._extract_flanks(contig, d_bound, d_dir, Context.DOWNSTREAM, gene_intervals, locus.downstream_flanks,
-                                 primary_strand, macro_bounds)
+                                 primary_strand, macro_bounds, claimed)
 
             loci.append(locus)
 
@@ -449,9 +453,10 @@ class LocusBuilder:
         u_dir = -1 if first.strand == 1 else 1
         u_bound = first.t_start if first.strand == 1 else first.t_end
         u_ints = self.topology_engine.features.get(first.t_name)
+        claimed: set[tuple[str, int]] = set()
         self._extract_flanks(
             first.t_name, u_bound, u_dir, Context.UPSTREAM, u_ints, locus.upstream_flanks,
-            Strand(first.strand), (first.t_start, first.t_end)
+            Strand(first.strand), (first.t_start, first.t_end), claimed
         )
 
         # 3. DOWNSTREAM FLANKS (Strictly from the last fragment)
@@ -460,7 +465,7 @@ class LocusBuilder:
         v_ints = self.topology_engine.features.get(last.t_name)
         self._extract_flanks(
             last.t_name, v_bound, v_dir, Context.DOWNSTREAM, v_ints, locus.downstream_flanks,
-            Strand(last.strand), (last.t_start, last.t_end)
+            Strand(last.strand), (last.t_start, last.t_end), claimed
         )
 
         # 4. INSIDE PASSENGERS (Sweep across ALL fragments, including unaligned synthetic bubbles)

@@ -1,4 +1,4 @@
-from typing import NamedTuple, Iterable, KeysView, Callable
+from typing import NamedTuple, Iterable, KeysView, Callable, Optional
 from collections import defaultdict
 from functools import partial
 
@@ -152,7 +152,7 @@ class TopologyEngine:
     It provides tools for "stitching" together partial alignments that span
     multiple contigs by finding valid physical paths through the graph.
     """
-    __slots__ = ('_graph', 'contig_lengths', 'contig_depths', 'features', '_visited_nodes', 'mode', '_end_overlap',
+    __slots__ = ('_graph', 'contig_lengths', 'contig_depths', 'features', 'mode', '_end_overlap',
                  'circular')
 
     def __init__(self, edges: Iterable[Edge], contig_lengths: dict[str, int], contig_depths: dict[str, float],
@@ -179,7 +179,6 @@ class TopologyEngine:
         self.contig_lengths: dict[str, int] = contig_lengths
         self.contig_depths: dict[str, float] = contig_depths
         self.features: dict[str, IntervalBatch] = features or {}
-        self._visited_nodes: set[tuple[str, int]] = set()
         self.circular: frozenset[str] = frozenset(circular)
 
         self.mode: str = mode
@@ -536,7 +535,8 @@ class TopologyEngine:
         # If it reaches a dead end before finding the target anchor
         return []
 
-    def traverse(self, start_node: str, exit_strand: Strand, hops_needed: int) -> list[tuple[str, int, IntervalBatch]]:
+    def traverse(self, start_node: str, exit_strand: Strand, hops_needed: int,
+                 claimed: Optional[set[tuple[str, int]]] = None) -> list[tuple[str, int, IntervalBatch]]:
         """
         Uses a breadth-first search to traverse the assembly graph.
 
@@ -549,10 +549,14 @@ class TopologyEngine:
             hops_needed: Maximum number of features (intervals) to find. In collapse mode this is per branch, so
                 every copy of a collapsed repeat gets flanks; in variant mode it is shared by all branches, as each
                 copy is already its own locus and a budget per branch would only fan its flanks out.
+            claimed: The genes, as (contig, original index), already reported as flanks of the locus this walk is
+                for; the walk skips them and adds the ones it reports. Share it between the walks of one locus, so
+                that no gene is reported twice, but never between loci, or flanks would depend on locus order (#54).
 
         Returns:
             list: (contig_id, hop_index, projected_IntervalBatch)
         """
+        claimed = set() if claimed is None else claimed
         queue = [(start_node, exit_strand, hops_needed, 1, 0)]
         projected_results = []
         visited_edges = {(start_node, exit_strand)}
@@ -584,10 +588,10 @@ class TopologyEngine:
                         else np.arange(max(0, len(n_ints) - rem_hops), len(n_ints))[::-1]
 
                     valid_indices = [i for i in raw_indices if
-                                     (v, n_ints.original_indices[i]) not in self._visited_nodes]
+                                     (v, n_ints.original_indices[i]) not in claimed]
                     if valid_indices:
                         for i in valid_indices:
-                            self._visited_nodes.add((v, n_ints.original_indices[i]))
+                            claimed.add((v, n_ints.original_indices[i]))
 
                         batch = n_ints.filter(valid_indices)
                         flip_len = self.contig_lengths[v] if edge.v_strand == Strand.REVERSE else None
