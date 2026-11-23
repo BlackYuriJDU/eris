@@ -275,7 +275,9 @@ class ReportRow:
             (e.g. `ctgA+,ctgB-,ctgC+`); a single contig for a local locus.
         gene_id: The identifier of the contextual passenger or flanking gene.
         context: The spatial relationship (e.g., INSIDE, UPSTREAM) of the gene to the target.
-        dist_bp: Distance in base pairs between the gene and the target element.
+        dist_bp: Gap in base pairs between the gene and the target element, never negative: a gene that overlaps the
+            target is 0 bp away, and its context (OVERLAPPING, OVERLAPPING_START or OVERLAPPING_END) says so. -1 for
+            an isolated locus row, which has no gene.
         topo_hops: Number of graph nodes traversed to find this gene (0 if on the same contig).
         orientation: Strand orientation of the gene relative to the target (same or opposite).
         effect: Biological impact of the insertion on the gene (e.g., TRUNCATED, NONE).
