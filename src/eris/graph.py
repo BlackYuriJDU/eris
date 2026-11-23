@@ -57,6 +57,16 @@ def circular_contigs(edges: Iterable[Edge]) -> frozenset[str]:
     return frozenset(self_linked - linked_elsewhere)
 
 
+class Branch(NamedTuple):
+    """
+    One extra start for a flank walk (see TopologyEngine.traverse): a link to walk out along, the flank budget along
+    it, and where the link's source contig starts in the walk's projected coordinates.
+    """
+    edge: Edge
+    budget: int
+    shift: int
+
+
 class Graph:
     """
     Manages an assembly graph, supporting both directed and undirected traversal.
@@ -143,6 +153,16 @@ class Graph:
         implicit reverse connections.
         """
         return self.adj.get(node_id, {}).keys()
+
+
+def links_leaving(graph: Graph, hub: dict[str, Strand], side: int) -> list[Edge]:
+    """
+    The links that leave a repeat hub on one side: `side` 1 for the side the hub's contigs are read out of on the
+    strands in `hub`, -1 for the side they are read into. A link leaves from the end on that side of one of the hub's contigs, so
+    following edge orientation from it never turns back towards the hub, and goes to a contig outside the hub.
+    """
+    return [e for contig, strand in hub.items() for e in graph.get_neighbors(contig)
+            if e.u_strand == strand * side and e.v not in hub]
 
 
 class TopologyEngine:
@@ -535,9 +555,15 @@ class TopologyEngine:
         # If it reaches a dead end before finding the target anchor
         return []
 
+    def links_leaving(self, hub: dict[str, Strand], side: int) -> list[Edge]:
+        """The links that leave a repeat hub on one side (see `links_leaving`)."""
+        return links_leaving(self._graph, hub, side)
+
     def traverse(self, start_node: str, exit_strand: Strand, hops_needed: int,
                  claimed: Optional[set[tuple[str, int]]] = None,
-                 reach: Optional[int] = None) -> list[tuple[str, int, IntervalBatch]]:
+                 reach: Optional[int] = None,
+                 branches: Iterable[Branch] = (),
+                 blocked: frozenset[str] = frozenset()) -> list[tuple[str, int, IntervalBatch]]:
         """
         Uses a breadth-first search to traverse the assembly graph.
 
@@ -556,24 +582,33 @@ class TopologyEngine:
             reach: If given, the furthest a feature may start, in the projected coordinates (the start contig read
                 along the walk, from 0). Features starting past it are left out and do not use up the budget, and
                 the walk does not enter a contig that starts past it (#55).
+            branches: Further links to walk out along, each with its own budget, as if the walk had already
+                reached their source contig (#56). Collapse mode starts one from every link leaving a repeat hub, so
+                each copy collapsed into it gets flanks; the links are walked in place of adding edges to the graph.
+                Their source contigs are not re-entered.
+            blocked: Contigs the walk never enters, such as those of the stitched path a hub's branches leave from,
+                so a branch cannot loop back into the hub and report the hub's own genes as flanks.
 
         Returns:
             list: (contig_id, hop_index, projected_IntervalBatch)
         """
         claimed = set() if claimed is None else claimed
-        queue = [(start_node, exit_strand, hops_needed, 1, 0)]
+        # (contig, exit strand, budget, hop index, shift, the links to follow or None for all leaving by the exit)
+        queue: list[tuple[str, Strand, int, int, int, Optional[tuple[Edge, ...]]]] = [
+            (start_node, exit_strand, hops_needed, 1, 0, None)]
+        queue += [(b.edge.u, b.edge.u_strand, b.budget, 1, b.shift, (b.edge,)) for b in branches]
         projected_results = []
-        visited_edges = {(start_node, exit_strand)}
+        visited_edges = {(ctg, strand) for ctg, strand, *_ in queue}
         per_branch = self.mode == 'collapse'
         wrapped = False
 
         while queue:
-            curr_ctg, curr_exit, parent_hops, node_depth, shift = queue.pop(0)
+            curr_ctg, curr_exit, parent_hops, node_depth, shift, links = queue.pop(0)
             if parent_hops <= 0: continue
             rem_hops = parent_hops
 
-            for edge in self._graph.get_neighbors(curr_ctg):
-                if edge.u_strand != curr_exit: continue
+            for edge in self._graph.get_neighbors(curr_ctg) if links is None else links:
+                if edge.u_strand != curr_exit or edge.v in blocked: continue
                 if per_branch: rem_hops = parent_hops
 
                 v = edge.v
@@ -613,6 +648,6 @@ class TopologyEngine:
                         rem_hops -= found_count
 
                 if rem_hops > 0:
-                    queue.append((v, edge.v_strand, rem_hops, node_depth + 1, new_shift))
+                    queue.append((v, edge.v_strand, rem_hops, node_depth + 1, new_shift, None))
 
         return projected_results
