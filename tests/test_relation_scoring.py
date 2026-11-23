@@ -344,3 +344,26 @@ def test_part_of_a_sequence_is_placed_through_its_context(tmp_path):
     assert placer.place_part(reverse_complement(chrom[4000:7000]).encode(), 1000, 2000) == [
         Placement("chr", 5000, 6000, "-", 1.0)]
     assert placer.lengths == {"chr": 20000}
+
+
+def test_distance_of_a_found_relation_is_read_off_the_locus_covering_its_copy():
+    # g is 450 bp upstream of ISA_1; the locus of ISA_2 also reports it, nearer, at 100 bp
+    a2 = copy("ISA_2", 30000, 31000)
+    place = placed(g=(9000, 9550), a2_up=(29000, 29950))
+    loci = [locus("ISA", up=[relation("g", Context.UPSTREAM, 450)]),
+            locus("ISA", up=[relation("a2_up", Context.UPSTREAM, 50), relation("g", Context.UPSTREAM, 100)],
+                  id_="locus_ISA_2")]
+    score = score_assignment([A1, a2], ["g", "a2_up"], loci, GROUPS, place,
+                             covering(locus_ISA=[A1], locus_ISA_2=[a2]))
+
+    assert (score.band_agreement, sorted(score.distance_errors)) == (1.0, [0, 0])
+
+
+def test_band_disagreements_of_found_relations_are_kept_by_group_side_and_gene():
+    place = placed(a_up=(9000, 9900), a_down=(11000, 12000))
+    # a_down is 0 bp downstream, but eris puts it far; a_up is near, as the reference has it
+    loci = [locus("ISA", up=[relation("a_up", Context.UPSTREAM, 90)],
+                  down=[relation("a_down", Context.DOWNSTREAM, 400)])]
+    score = score_assignment([A1], ["a_up", "a_down"], loci, GROUPS, place, covering(locus_ISA=[A1]))
+
+    assert score.band_errors == {("grpA", "downstream", "a_down")}
