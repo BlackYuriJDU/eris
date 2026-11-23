@@ -377,7 +377,9 @@ RELATION_BENCHMARKS = {
     "fragmented": ("contigs_shovill_simulated.gfa", {"HG941718.1"}),  # simulated from the chromosome only
 }
 RELATION_HOPS = 3  # eris's default
-REACH_HOPS = 20  # a miss found with this budget is put down to the budget, not to a wrong gene
+# A miss found with REACH_HOPS is put down to the budget, not to a wrong gene. Both runs use eris's default
+# --max-flank-distance, so a gene beyond it is a 'gene' miss (FN_unreported), not a budget one
+REACH_HOPS = 20
 
 # Truth relations eris misses, as {(isoform group, side, locus tag): cause}. The cause is "budget" when a run with
 # REACH_HOPS finds the relation, else "gene". A new miss fails, and so does a fixed one or one whose cause changes,
@@ -439,8 +441,8 @@ KNOWN_RELATION_MISSES = {
         ("ISEc12", "downstream", "EC958_RS07600"): "gene",
         ("ISEc12", "downstream", "EC958_RS11780"): "gene",
         ("ISEc12", "downstream", "EC958_RS24865"): "gene",
-        ("ISEc12", "upstream", "EC958_RS07585"): "budget",
-        ("ISEc12", "upstream", "EC958_RS15715"): "budget",
+        ("ISEc12", "upstream", "EC958_RS07585"): "gene",
+        ("ISEc12", "upstream", "EC958_RS15715"): "gene",
         ("ISEc22", "downstream", "EC958_RS29550"): "gene",
         ("ISEc22", "upstream", "EC958_RS16805"): "budget",
         ("ISEc23", "downstream", "EC958_RS01090"): "gene",
@@ -600,8 +602,6 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("IS609", "upstream", "HG941718.1_2104066_2104614"), "FP_side"),
     },
     ("fragmented", "collapse"): {
-        (("ISEc12", "upstream", "1243278_59_1681"), "FN_budget"),
-        (("ISEc12", "upstream", "1244912_33_491"), "FN_budget"),
         (("IS600", "downstream", "1242486_319_774"), "FN_group"),
         (("IS600", "upstream", "1206755_158_400"), "FN_group"),
         (("ISEc22", "upstream", "1244674_144_1244"), "FN_group"),
@@ -624,6 +624,8 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("ISEc12", "downstream", "1240840_119_457"), "FN_unreported"),
         (("ISEc12", "downstream", "1242518_223_333"), "FN_unreported"),
         (("ISEc12", "downstream", "1244454_398_511"), "FN_unreported"),
+        (("ISEc12", "upstream", "1243278_59_1681"), "FN_unreported"),
+        (("ISEc12", "upstream", "1244912_33_491"), "FN_unreported"),
         (("ISEc23", "downstream", "1243328_67_579"), "FN_unreported"),
         (("ISEc23", "downstream", "1243458_2550_2825"), "FN_unreported"),
         (("ISEc23", "upstream", "1245118_80_268"), "FN_unreported"),
@@ -697,12 +699,7 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("ISEc8", "downstream", "1240608_1_192"), "FP_unplaced"),
     },
     ("real", "collapse"): {
-        (("IS26", "upstream", "2412009_2_505"), "FN_budget"),
         (("IS26", "upstream", "2416277_55_2070"), "FN_budget"),
-        (("IS26", "upstream", "2418902_4830_5795"), "FN_budget"),
-        (("IS26", "upstream", "2421014_5513_7786"), "FN_budget"),
-        (("IS26", "upstream", "2421078_21711_22349"), "FN_budget"),
-        (("IS26", "upstream", "2421282_2_82"), "FN_budget"),
         (("IS26", "downstream", "2419854_1_87"), "FN_group"),
         (("IS3411", "upstream", "2419478_533_709"), "FN_group"),
         (("IS600", "downstream", "2418702_3_533"), "FN_group"),
@@ -730,6 +727,11 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("IS26", "downstream", "2419936_1_237"), "FN_unreported"),
         (("IS26", "downstream", "2420268_803_1522"), "FN_unreported"),
         (("IS26", "downstream", "2420676_23_157"), "FN_unreported"),
+        (("IS26", "upstream", "2412009_2_505"), "FN_unreported"),
+        (("IS26", "upstream", "2418902_4830_5795"), "FN_unreported"),
+        (("IS26", "upstream", "2421014_5513_7786"), "FN_unreported"),
+        (("IS26", "upstream", "2421078_21711_22349"), "FN_unreported"),
+        (("IS26", "upstream", "2421282_2_82"), "FN_unreported"),
         (("IS3411", "downstream", "2402724_2564_2779"), "FN_unreported"),
         (("IS3411", "downstream", "2417355_1_207"), "FN_unreported"),
         (("IS600", "upstream", "2418794_86_1237"), "FN_unreported"),
@@ -766,7 +768,7 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("ISEc52", "downstream", "2367790_1_129"), "FP_unplaced"),
     },
     ("real", "variant"): {
-        (("IS26", "downstream", "2419936_10176_11081"), "FN_budget"),
+        (("IS1397", "upstream", "2420246_11_181"), "FN_budget"),
         (("IS26", "upstream", "2412009_2_505"), "FN_budget"),
         (("IS26", "upstream", "2421014_5513_7786"), "FN_budget"),
         (("IS26", "upstream", "2421078_21711_22349"), "FN_budget"),
@@ -774,6 +776,7 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("ISEc22", "downstream", "2421266_62_445"), "FN_budget"),
         (("ISEc23", "downstream", "2420376_8630_9643"), "FN_budget"),
         (("ISEc23", "upstream", "2420074_39_434"), "FN_budget"),
+        (("ISEc23", "upstream", "2421212_6881_8077"), "FN_budget"),
         (("ISEc22", "upstream", "2420294_104_1204"), "FN_group"),
         (("ISEc23", "downstream", "2419792_2510_2785"), "FN_group"),
         (("ISEc52", "upstream", "2416971_22_225"), "FN_group"),
@@ -783,12 +786,11 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("ISSen1", "upstream", "2420282_31047_31205"), "FN_undetected"),
         (("ISSen10", "downstream", "2419496_1_495"), "FN_undetected"),
         (("ISSen10", "upstream", "2402724_449_1957"), "FN_undetected"),
-        (("IS1397", "upstream", "2420246_11_181"), "FN_unreported"),
+        (("IS26", "downstream", "2419936_10176_11081"), "FN_unreported"),
         (("IS26", "downstream", "2420268_803_1522"), "FN_unreported"),
         (("IS609", "upstream", "2419948_17153_17650"), "FN_unreported"),
         (("IS609", "upstream", "2421278_133398_135122"), "FN_unreported"),
         (("ISEc23", "downstream", "2420362_10091_10168"), "FN_unreported"),
-        (("ISEc23", "upstream", "2421212_6881_8077"), "FN_unreported"),
         (("IS3411", "downstream", "2419496_1_495"), "FP_group"),
         (("IS3411", "downstream", "2420468_1_114"), "FP_group"),
         (("IS3411", "upstream", "2402724_449_1957"), "FP_group"),

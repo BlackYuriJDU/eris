@@ -176,7 +176,7 @@ def test_local_sequence_is_its_slice_of_the_contig():
     assert locus.extract_sequence(genome) == "AACCCG"
 
 
-def _flank_builder(lengths, edges, gene_spans, mode='variant'):
+def _flank_builder(lengths, edges, gene_spans, mode='variant', **builder_args):
     """gene_spans: contig -> (start, end) of its one gene, read on '+'; flanks are searched one gene deep."""
     intervals = {c: IntervalBatch(np.array([s]), np.array([e]), np.array([Strand.FORWARD], dtype=np.int8))
                  for c, (s, e) in gene_spans.items()}
@@ -184,7 +184,7 @@ def _flank_builder(lengths, edges, gene_spans, mode='variant'):
                 for c, (s, e) in gene_spans.items()}
     no_indels = {c: [SimpleNamespace(insertions=[], deletions=[])] for c in gene_spans}
     return _builder(lengths, edges, mode=mode, intervals=intervals, max_feature_hops=1, features=features,
-                    genes=no_indels)
+                    genes=no_indels, **builder_args)
 
 
 def test_downstream_flank_across_a_link_counts_the_overlap_once():
@@ -226,6 +226,61 @@ def test_flank_two_links_away_counts_each_overlap_once():
     assert [(f.distance_bp, f.topological_dist) for f in locus.downstream_flanks] == [(550, 2)]
 
 
+@pytest.mark.parametrize("limit, reported", [(499, False), (500, True)])
+@pytest.mark.parametrize("gene, aln_start, side", [((1500, 1800), 800, "downstream"), ((100, 300), 800, "upstream")])
+def test_a_flank_on_the_targets_own_contig_is_reported_only_within_the_max_flank_distance(
+        limit, reported, gene, aln_start, side):
+    # The gene is 500 bp from the IS on either side
+    builder = _flank_builder({"ctgA": 10000}, [], {"ctgA": gene}, max_flank_distance=limit)
+    alignments = {"ctgA": _batch([("IS1", 200, 0, 200, "ctgA", 10000, aln_start, aln_start + 200, 200, 200)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert _flank_genes(getattr(locus, f"{side}_flanks")) == ([("gene_ctgA", 500)] if reported else [])
+
+
+@pytest.mark.parametrize("mode", ["variant", "collapse"])
+@pytest.mark.parametrize("limit, reported", [(549, False), (550, True)])
+def test_a_flank_across_links_is_reported_only_within_the_max_flank_distance(mode, limit, reported):
+    # ctgB carries no gene, so --hops alone does not stop the walk; ctgC's gene is 550 bp past the locus end
+    builder = _flank_builder({"ctgA": 1000, "ctgB": 500, "ctgC": 1000},
+                             [Edge("ctgA", Strand.FORWARD, "ctgB", Strand.FORWARD, overlap=100),
+                              Edge("ctgB", Strand.FORWARD, "ctgC", Strand.FORWARD, overlap=50)],
+                             {"ctgC": (200, 400)}, mode=mode, max_flank_distance=limit)
+    alignments = {"ctgA": _batch([("IS1", 200, 0, 200, "ctgA", 1000, 800, 1000, 200, 200)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert _flank_genes(locus.downstream_flanks) == ([("gene_ctgC", 550)] if reported else [])
+
+
+@pytest.mark.parametrize("limit, reported", [(299, False), (300, True)])
+def test_an_upstream_flank_across_a_link_entered_backwards_is_reported_only_within_the_max_flank_distance(
+        limit, reported):
+    # 'ctgB+ -> ctgA+' share 100 bp, so the gene ending at 600 on ctgB is 300 bp before the locus at ctgA's start
+    builder = _flank_builder({"ctgA": 1000, "ctgB": 1000},
+                             [Edge("ctgB", Strand.FORWARD, "ctgA", Strand.FORWARD, overlap=100)],
+                             {"ctgB": (300, 600)}, max_flank_distance=limit)
+    alignments = {"ctgA": _batch([("IS1", 200, 0, 200, "ctgA", 1000, 0, 200, 200, 200)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert _flank_genes(locus.upstream_flanks) == ([("gene_ctgB", 300)] if reported else [])
+
+
+def test_a_gene_beyond_the_max_flank_distance_does_not_use_up_the_flank_budget():
+    # Two branches leave ctgA: the gene on ctgFar is beyond the limit, so the one on ctgNear still gets reported
+    builder = _flank_builder({"ctgA": 1000, "ctgFar": 5000, "ctgNear": 1000},
+                             [Edge("ctgA", Strand.FORWARD, "ctgFar", Strand.FORWARD),
+                              Edge("ctgA", Strand.FORWARD, "ctgNear", Strand.FORWARD)],
+                             {"ctgFar": (4000, 4300), "ctgNear": (100, 400)}, max_flank_distance=1000)
+    alignments = {"ctgA": _batch([("IS1", 200, 0, 200, "ctgA", 1000, 800, 1000, 200, 200)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert _flank_genes(locus.downstream_flanks) == [("gene_ctgNear", 100)]
+
+
 @pytest.mark.parametrize("order", [("ctgA", "ctgB"), ("ctgB", "ctgA")])
 def test_two_loci_whose_walks_reach_the_same_gene_both_report_it(order):
     # 'ctgA+ -> ctgC+' and 'ctgB+ -> ctgC+': each IS runs off its contig's end into ctgC, so ctgC's gene flanks both
@@ -255,7 +310,7 @@ def test_a_gene_two_branches_of_one_locus_reach_is_reported_once(mode):
     assert [f.feature.id for f in locus.downstream_flanks] == ["gene_ctgB"]
 
 
-def _circular_builder(length, gene_spans, overlap=0, hops=1):
+def _circular_builder(length, gene_spans, overlap=0, hops=1, **builder_args):
     """One circular contig 'chrom', closed by a self-link, carrying genes read on '+' at gene_spans."""
     starts, ends = zip(*gene_spans)
     intervals = {"chrom": IntervalBatch(np.array(starts), np.array(ends),
@@ -265,7 +320,7 @@ def _circular_builder(length, gene_spans, overlap=0, hops=1):
     no_indels = {"chrom": [SimpleNamespace(insertions=[], deletions=[]) for _ in gene_spans]}
     return _builder({"chrom": length}, [Edge("chrom", Strand.FORWARD, "chrom", Strand.FORWARD, overlap=overlap)],
                     intervals=intervals, max_feature_hops=hops, features=features, genes=no_indels,
-                    circular={"chrom"})
+                    circular={"chrom"}, **builder_args)
 
 
 def _flank_genes(flanks):
@@ -290,6 +345,16 @@ def test_a_gene_just_before_the_origin_flanks_a_target_at_the_start_of_a_circula
 
     assert _flank_genes(locus.upstream_flanks) == [("gene_5000", 4500)]
     assert _flank_genes(locus.downstream_flanks) == [("gene_300", 100)]
+
+
+@pytest.mark.parametrize("limit, reported", [(299, False), (300, True)])
+def test_a_flank_across_the_origin_is_reported_only_within_the_max_flank_distance(limit, reported):
+    builder = _circular_builder(10000, [(300, 600), (5000, 5500)], max_flank_distance=limit)
+    alignments = {"chrom": _batch([("IS1", 200, 0, 200, "chrom", 10000, 9800, 10000, 200, 200)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert _flank_genes(locus.downstream_flanks) == ([("gene_300", 300)] if reported else [])
 
 
 def test_a_flank_across_the_origin_counts_the_self_link_overlap_once():
