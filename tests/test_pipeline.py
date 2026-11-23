@@ -591,7 +591,7 @@ def test_a_hub_branch_is_measured_from_where_its_own_copys_target_ends():
 
 def test_a_hub_branch_ignores_an_alignment_that_starts_past_the_overlap():
     # IS3X starts on b2 just where the 100 bp it shares with the hub ends: it is another IS beside this copy, not this
-    # copy's target running on past the hub, so b2's gene is still measured from the hub's edge
+    # copy's target running on past the hub, so this copy's target still ends where b2 is entered
     alignments = {"b2": _batch([("IS3X", 1200, 1050, 1200, "b2", 1000, 100, 250, 150, 150)])}
     locus = _hub_locus('collapse', extra_alignments=alignments)
 

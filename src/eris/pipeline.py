@@ -162,6 +162,7 @@ class Locus:
 
 # Constants ------------------------------------------------------------------------------------------------------------
 MIN_SHARED_FRACTION = 0.5  # Of the shorter alignment, for two alignments to be one IS copy
+BRANCH_ENTRY_SLACK = 10  # bp into a hub branch's first contig a copy's target may start and still run on from the hub
 
 
 # Functions ------------------------------------------------------------------------------------------------------------
@@ -371,7 +372,7 @@ class LocusBuilder:
         else:
             length = self.genome.contig_lengths[e.v]
             starts, ends = length - batch.t_ends, length - batch.t_starts
-        entering = starts <= 10
+        entering = starts <= BRANCH_ENTRY_SLACK
         if not entering.any():
             return 0
         return max(0, int(ends[entering].max()) - e.overlap)
