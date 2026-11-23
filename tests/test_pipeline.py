@@ -176,14 +176,15 @@ def test_local_sequence_is_its_slice_of_the_contig():
     assert locus.extract_sequence(genome) == "AACCCG"
 
 
-def _flank_builder(lengths, edges, gene_spans):
+def _flank_builder(lengths, edges, gene_spans, mode='variant'):
     """gene_spans: contig -> (start, end) of its one gene, read on '+'; flanks are searched one gene deep."""
     intervals = {c: IntervalBatch(np.array([s]), np.array([e]), np.array([Strand.FORWARD], dtype=np.int8))
                  for c, (s, e) in gene_spans.items()}
     features = {c: [GenomicFeature(f"gene_{c}", FeatureType.CDS, [LocationSegment(c, s, e, Strand.FORWARD)])]
                 for c, (s, e) in gene_spans.items()}
     no_indels = {c: [SimpleNamespace(insertions=[], deletions=[])] for c in gene_spans}
-    return _builder(lengths, edges, intervals=intervals, max_feature_hops=1, features=features, genes=no_indels)
+    return _builder(lengths, edges, mode=mode, intervals=intervals, max_feature_hops=1, features=features,
+                    genes=no_indels)
 
 
 def test_downstream_flank_across_a_link_counts_the_overlap_once():
@@ -223,6 +224,35 @@ def test_flank_two_links_away_counts_each_overlap_once():
     [locus] = builder.assemble(alignments)
 
     assert [(f.distance_bp, f.topological_dist) for f in locus.downstream_flanks] == [(550, 2)]
+
+
+@pytest.mark.parametrize("order", [("ctgA", "ctgB"), ("ctgB", "ctgA")])
+def test_two_loci_whose_walks_reach_the_same_gene_both_report_it(order):
+    # 'ctgA+ -> ctgC+' and 'ctgB+ -> ctgC+': each IS runs off its contig's end into ctgC, so ctgC's gene flanks both
+    builder = _flank_builder({"ctgA": 1000, "ctgB": 1000, "ctgC": 1000},
+                             [Edge("ctgA", Strand.FORWARD, "ctgC", Strand.FORWARD),
+                              Edge("ctgB", Strand.FORWARD, "ctgC", Strand.FORWARD)],
+                             {"ctgC": (300, 600)})
+    alignments = {c: _batch([("IS1", 200, 0, 200, c, 1000, 800, 1000, 200, 200)]) for c in order}
+
+    loci = list(builder.assemble(alignments))
+
+    assert sorted((locus.contig, _flank_genes(locus.downstream_flanks)) for locus in loci) == [
+        ("ctgA", [("gene_ctgC", 300)]), ("ctgB", [("gene_ctgC", 300)])]
+
+
+@pytest.mark.parametrize("mode", ["variant", "collapse"])
+def test_a_gene_two_branches_of_one_locus_reach_is_reported_once(mode):
+    # 'ctgA+ -> ctgB+' and 'ctgA+ -> ctgB-' enter ctgB on both strands, and both reach its one gene
+    builder = _flank_builder({"ctgA": 1000, "ctgB": 1000},
+                             [Edge("ctgA", Strand.FORWARD, "ctgB", Strand.FORWARD),
+                              Edge("ctgA", Strand.FORWARD, "ctgB", Strand.REVERSE)],
+                             {"ctgB": (300, 600)}, mode=mode)
+    alignments = {"ctgA": _batch([("IS1", 200, 0, 200, "ctgA", 1000, 800, 1000, 200, 200)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert [f.feature.id for f in locus.downstream_flanks] == ["gene_ctgB"]
 
 
 def _circular_builder(length, gene_spans, overlap=0, hops=1):
