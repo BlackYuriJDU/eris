@@ -17,7 +17,7 @@ from eris.io import TargetDatabase, GenomeAssembly, gene_id
 from eris.graph import TopologyEngine
 from eris.alignment import AlignmentBatch, AlignmentRecord, pooled_identity
 from eris.interval import IntervalBatch, Context, Strand, Interval
-from eris.constants import FeatureType, Orientation, Effect
+from eris.constants import FeatureType, Orientation, Effect, DEFAULT_MAX_FLANK_DISTANCE
 from eris.copy_number import CopyNumber, assign_copy_numbers, covers_contig
 
 
@@ -169,13 +169,14 @@ class LocusBuilder:
     identifies flanking and passenger genes for each identified locus.
     """
     __slots__ = ('topology_engine', 'genome', 'target_feature_type', 'max_feature_hops',
-                 'locus_tolerance', 'features', 'genes')
+                 'locus_tolerance', 'features', 'genes', 'max_flank_distance')
 
     def __init__(self, topology_engine: 'TopologyEngine', genome: 'GenomeAssembly',
                  target_feature_type: FeatureType = FeatureType.CDS,
                  max_feature_hops: int = 3, locus_tolerance: int = 0,
                  features: dict[str, list[GenomicFeature]] = None,
-                 genes: dict[str, list[Gene]] = None):
+                 genes: dict[str, list[Gene]] = None,
+                 max_flank_distance: Optional[int] = DEFAULT_MAX_FLANK_DISTANCE):
         """
         Initialize the LocusBuilder.
 
@@ -187,6 +188,8 @@ class LocusBuilder:
             locus_tolerance: bp tolerance for merging adjacent targets.
             features: Dictionary of GenomicFeatures per contig.
             genes: Dictionary of PyFGS Gene objects per contig.
+            max_flank_distance: Max distance (bp) from the target to a flank, on its own contig or across the
+                graph; None for no limit.
         """
         self.topology_engine = topology_engine
         self.genome = genome
@@ -195,6 +198,7 @@ class LocusBuilder:
         self.locus_tolerance = locus_tolerance
         self.features = features or {}
         self.genes = genes or {}
+        self.max_flank_distance = max_flank_distance
 
     def assemble(self, alignments: dict, min_coverage: float = 0.30, min_identity: float = 0.0) -> Iterable['Locus']:
         """
@@ -319,9 +323,11 @@ class LocusBuilder:
         """
         Walks the contig (and graph) from a boundary to find flanking features. `claimed` holds the genes the graph
         walks have already reported for this locus (see TopologyEngine.traverse); start a new one for each locus.
+        Features further than `max_flank_distance` from the boundary are left out, wherever they lie (#55).
         """
         rem_hops = self.max_feature_hops
         exit_strand = Strand.REVERSE if walk_direction == -1 else Strand.FORWARD
+        limit = self.max_flank_distance
 
         # 1. Local Search
         if intervals:
@@ -329,6 +335,7 @@ class LocusBuilder:
                 idx = np.searchsorted(intervals.ends, boundary, side='right')
                 for i in reversed(range(max(0, idx - self.max_feature_hops), idx)):
                     d = max(0, boundary - intervals.ends[i])
+                    if limit is not None and d > limit: continue
                     f = self._resolve_relation(contig, i, intervals, context, int(d), 0, target_strand, target_bounds)
                     dest_list.append(f)
                     rem_hops -= 1
@@ -336,13 +343,18 @@ class LocusBuilder:
                 idx = np.searchsorted(intervals.starts, boundary, side='left')
                 for i in range(idx, min(len(intervals), idx + self.max_feature_hops)):
                     d = max(0, intervals.starts[i] - boundary)
+                    if limit is not None and d > limit: continue
                     f = self._resolve_relation(contig, i, intervals, context, int(d), 0, target_strand, target_bounds)
                     dest_list.append(f)
                     rem_hops -= 1
 
         # 2. Graph Spillover
         if rem_hops > 0:
-            for s_ctg, node_depth, batch in self.topology_engine.traverse(contig, exit_strand, rem_hops, claimed):
+            # The walk reads the contig along its direction from 0, so the boundary sits here in its coordinates
+            walk_boundary = boundary if walk_direction == 1 else self.genome.contig_lengths[contig] - boundary
+            reach = None if limit is None else walk_boundary + limit
+            for s_ctg, node_depth, batch in self.topology_engine.traverse(contig, exit_strand, rem_hops, claimed,
+                                                                          reach):
                 across_origin = s_ctg == contig and contig in self.topology_engine.circular
                 for i in range(len(batch)):
                     if across_origin and not self._before_target_across_origin(
@@ -493,12 +505,12 @@ class Pipeline:
     for parallel contig processing.
     """
     __slots__ = ('target_db', '_gene_finder', 'max_feature_hops', 'locus_tolerance', '_executor', 'mode', 'min_coverage',
-                 'min_identity')
+                 'min_identity', 'max_flank_distance')
     _THREAD_LOCAL = thread_local()
 
     def __init__(self, target_db: 'TargetDatabase', max_feature_hops: int = 3, locus_tolerance: int = 0,
                  max_workers: Optional[int] = None, mode: str = 'variant', min_coverage: float = 0.30,
-                 min_identity: float = 0.0):
+                 min_identity: float = 0.0, max_flank_distance: Optional[int] = DEFAULT_MAX_FLANK_DISTANCE):
         """
         Initialize the Pipeline.
 
@@ -510,6 +522,8 @@ class Pipeline:
             mode: Resolution mode, 'variant' or 'collapse'.
             min_coverage: Minimum target coverage for a locus target to be reported.
             min_identity: Minimum target identity for a locus target to be reported.
+            max_flank_distance: Max distance (bp) from a target to a flank, on its own contig or across the graph;
+                None for no limit.
         """
         self.target_db = target_db
         self.max_feature_hops = max_feature_hops
@@ -517,6 +531,7 @@ class Pipeline:
         self.mode = mode
         self.min_coverage = min_coverage
         self.min_identity = min_identity
+        self.max_flank_distance = max_flank_distance
         self._gene_finder = GeneFinder(model=Model.Complete, whole_genome=False)
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
 
@@ -594,7 +609,8 @@ class Pipeline:
             max_feature_hops=self.max_feature_hops,
             locus_tolerance=self.locus_tolerance,
             features=gene_features,
-            genes=gene_cds
+            genes=gene_cds,
+            max_flank_distance=self.max_flank_distance
         )
 
         loci = builder.assemble(alignments, min_coverage=self.min_coverage, min_identity=self.min_identity)

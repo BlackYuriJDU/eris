@@ -2,7 +2,7 @@ import argparse
 
 import pytest
 
-from eris.cli import fraction
+from eris.cli import fraction, non_negative_int
 
 
 @pytest.mark.parametrize("value, expected", [("0", 0.0), ("0.9", 0.9), ("1", 1.0)])
@@ -14,6 +14,16 @@ def test_fraction_accepts_values_from_zero_to_one(value, expected):
 def test_fraction_rejects_values_outside_zero_to_one(value):
     with pytest.raises(argparse.ArgumentTypeError):
         fraction(value)
+
+
+def test_non_negative_int_accepts_zero_and_up():
+    assert non_negative_int("0") == 0 and non_negative_int("5000") == 5000
+
+
+@pytest.mark.parametrize("value", ["-1", "2.5", "far"])
+def test_non_negative_int_rejects_negative_and_non_whole_values(value):
+    with pytest.raises(argparse.ArgumentTypeError):
+        non_negative_int(value)
 
 
 # Start-up summary and warnings ----------------------------------------------------------------------------------------

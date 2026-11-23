@@ -536,7 +536,8 @@ class TopologyEngine:
         return []
 
     def traverse(self, start_node: str, exit_strand: Strand, hops_needed: int,
-                 claimed: Optional[set[tuple[str, int]]] = None) -> list[tuple[str, int, IntervalBatch]]:
+                 claimed: Optional[set[tuple[str, int]]] = None,
+                 reach: Optional[int] = None) -> list[tuple[str, int, IntervalBatch]]:
         """
         Uses a breadth-first search to traverse the assembly graph.
 
@@ -552,6 +553,9 @@ class TopologyEngine:
             claimed: The genes, as (contig, original index), already reported as flanks of the locus this walk is
                 for; the walk skips them and adds the ones it reports. Share it between the walks of one locus, so
                 that no gene is reported twice, but never between loci, or flanks would depend on locus order (#54).
+            reach: If given, the furthest a feature may start, in the projected coordinates (the start contig read
+                along the walk, from 0). Features starting past it are left out and do not use up the budget, and
+                the walk does not enter a contig that starts past it (#55).
 
         Returns:
             list: (contig_id, hop_index, projected_IntervalBatch)
@@ -573,20 +577,26 @@ class TopologyEngine:
                 if per_branch: rem_hops = parent_hops
 
                 v = edge.v
+                # Linked contigs share the edge overlap, so the next contig starts that much before this one ends
+                new_shift = shift + self.contig_lengths[curr_ctg] - edge.overlap
+                if reach is not None and new_shift > reach: continue
                 # The self-link of a circular contig leads back to its start across the origin: go round it once
                 if v in self.circular and is_self_link(edge) and not wrapped:
                     wrapped = True
                 elif (v, edge.v_strand) in visited_edges:
                     continue
                 visited_edges.add((v, edge.v_strand))
-                # Linked contigs share the edge overlap, so the next contig starts that much before this one ends
-                new_shift = shift + self.contig_lengths[curr_ctg] - edge.overlap
 
                 if v in self.features:
                     n_ints = self.features[v]
                     raw_indices = np.arange(0, min(len(n_ints), rem_hops)) if edge.v_strand == Strand.FORWARD \
                         else np.arange(max(0, len(n_ints) - rem_hops), len(n_ints))[::-1]
 
+                    if reach is not None:
+                        # Where each feature starts once the contig is read along the walk
+                        starts = n_ints.starts[raw_indices] if edge.v_strand == Strand.FORWARD \
+                            else self.contig_lengths[v] - n_ints.ends[raw_indices]
+                        raw_indices = raw_indices[starts + new_shift <= reach]
                     valid_indices = [i for i in raw_indices if
                                      (v, n_ints.original_indices[i]) not in claimed]
                     if valid_indices:

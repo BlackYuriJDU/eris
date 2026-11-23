@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
 from eris._version import __version__
-from eris.constants import FeatureType
+from eris.constants import DEFAULT_MAX_FLANK_DISTANCE, FeatureType
 
 if TYPE_CHECKING:
     from eris.io import GenomeAssembly
@@ -41,6 +41,17 @@ def fraction(value: str) -> float:
     if not 0.0 <= f <= 1.0:
         raise argparse.ArgumentTypeError(f"{value} is not between 0.0 and 1.0")
     return f
+
+
+def non_negative_int(value: str) -> int:
+    """Argparse type for a whole number of 0 or more."""
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a whole number") from None
+    if n < 0:
+        raise argparse.ArgumentTypeError(f"{value} is negative")
+    return n
 
 
 def _plural(n: int, noun: str) -> str:
@@ -104,6 +115,9 @@ def main():
     pipeline_args.add_argument('--hops', type=int, default=3, metavar='',
                         help='Maximum number of contextual genes to sweep upstream/downstream; in collapse mode, '
                              'along each graph branch, so every copy of a collapsed repeat gets flanks')
+    pipeline_args.add_argument('--max-flank-distance', type=non_negative_int, default=DEFAULT_MAX_FLANK_DISTANCE, metavar='',
+                        help='Maximum distance (bp) from a target to a contextual gene, on the target\'s own contig '
+                             'or across the assembly graph; caps how far --hops can reach')
     pipeline_args.add_argument('-l', '--tolerance', type=int, default=0, metavar='',
                         help='Distance tolerance (bp) for merging clustered target alignments')
     pipeline_args.add_argument('-t', '--max-workers', type=int, default=None, metavar='',
@@ -154,7 +168,8 @@ def main():
 
     # Hook up the OutputManager parameters explicitly
     with (Pipeline(target_db, args.hops, args.tolerance, args.max_workers, mode=args.mode,
-                   min_coverage=args.min_coverage, min_identity=args.min_identity) as pipeline,
+                   min_coverage=args.min_coverage, min_identity=args.min_identity,
+                   max_flank_distance=args.max_flank_distance) as pipeline,
           OutputManager(args.outprefix, write_gff=not args.no_gff, write_faa=not args.no_faa, write_fna=not args.no_fna, mode=args.mode) as out):
 
         log.msg("⌛️ Running topological traversal...\n", flush=True)

@@ -73,3 +73,6 @@ class Strand(IntEnum):
         if self == Strand.FORWARD: return '+'
         if self == Strand.REVERSE: return '-'
         return '.'
+
+# Defaults -------------------------------------------------------------------------------------------------------------
+DEFAULT_MAX_FLANK_DISTANCE = 5000  # bp from a target to its furthest flank (--max-flank-distance, #55)
