@@ -113,14 +113,28 @@ def test_two_abutting_copies_of_the_same_is_are_two_loci():
     assert sorted((locus.start, locus.end) for locus in loci) == [(1000, 1820), (1820, 2640)]
 
 
-@pytest.mark.parametrize("second_start, loci", [(1500, 1), (1501, 2)])
-def test_alignments_share_a_locus_only_when_they_share_at_least_half_the_shorter_one(second_start, loci):
+@pytest.mark.parametrize("strand, query_ranges", [(Strand.FORWARD, [(0, 500), (520, 1000)]),
+                                                  (Strand.REVERSE, [(520, 1000), (0, 500)])])
+def test_one_copy_split_into_two_touching_alignments_of_its_target_is_one_locus(strand, query_ranges):
+    # A deletion in the contig splits IS1's alignment in two: the pieces touch on the contig and follow on in IS1
+    builder = _builder({"ctgA": 5000})
+    (q1s, q1e), (q2s, q2e) = query_ranges
+    alignments = {"ctgA": _batch([("IS1", 1000, q1s, q1e, "ctgA", 5000, 1000, 1500, 500, 500),
+                                  ("IS1", 1000, q2s, q2e, "ctgA", 5000, 1500, 1980, 480, 480)], strands=[strand] * 2)}
+
+    [locus] = builder.assemble(alignments)
+
+    assert (locus.start, locus.end) == (1000, 1980)
+
+
+@pytest.mark.parametrize("second_start, expected_loci", [(1500, 1), (1501, 2)])
+def test_alignments_share_a_locus_only_when_they_share_at_least_half_the_shorter_one(second_start, expected_loci):
     # The shorter alignment is 1000 bp: sharing 500 of its bases is one locus, 499 is two
     builder = _builder({"ctgA": 5000})
     alignments = {"ctgA": _batch([("ISa", 1000, 0, 1000, "ctgA", 5000, 1000, 2000, 1000, 1000),
                                   ("ISb", 1200, 0, 1200, "ctgA", 5000, second_start, second_start + 1200, 1200, 1200)])}
 
-    assert len(list(builder.assemble(alignments))) == loci
+    assert len(list(builder.assemble(alignments))) == expected_loci
 
 
 def test_stitched_locus_reports_the_strand_each_contig_is_read_on():

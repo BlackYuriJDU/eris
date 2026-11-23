@@ -160,24 +160,39 @@ class Locus:
         tail = len(genome[last.contig]) - last.end if last.strand != Strand.REVERSE else last.start
         return path[head:len(path) - tail]
 
-# Functions ------------------------------------------------------------------------------------------------------------
+# Constants ------------------------------------------------------------------------------------------------------------
 MIN_SHARED_FRACTION = 0.5  # Of the shorter alignment, for two alignments to be one IS copy
 
 
-def same_copy_groups(intervals: 'IntervalBatch', tolerance: int = 0) -> list[np.ndarray]:
-    """
-    Groups the alignments on one contig by the IS copy they lie on, as index arrays into `intervals`, which must be
-    sorted, in order of their first alignment. Two alignments are one copy when they share at least half the shorter
-    one's bases, as near-identical targets (IS1A, IS1R) aligning to one copy do; copies that merely touch or overlap
-    by a few bases stay apart (#57, docs/adr/0006). A `tolerance` above 0 also joins alignments up to that many bp
-    apart. Grouping is transitive.
+# Functions ------------------------------------------------------------------------------------------------------------
+def _shares_half(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+    """Whether two ranges share at least half the shorter one's bases."""
+    shared = min(a_end, b_end) - max(a_start, b_start)
+    return shared >= MIN_SHARED_FRACTION * min(a_end - a_start, b_end - b_start)
 
-    Example:
-        >>> batch = IntervalBatch.from_intervals([Interval(0, 1000), Interval(2, 1000), Interval(998, 2000)])
-        >>> [g.tolist() for g in same_copy_groups(batch)]
-        [[0, 1], [2]]
+
+def same_copy_groups(alignments: 'AlignmentBatch', tolerance: int = 0) -> list[np.ndarray]:
     """
-    n = len(intervals)
+    Groups the alignments on one contig by the IS copy they lie on (#57, docs/adr/0006).
+
+    Two alignments are one copy when they share at least half the shorter one's bases, as near-identical targets
+    (IS1A, IS1R) aligning to one copy do, or when they are two pieces of one alignment: the same target on the same
+    strand, touching or overlapping on the contig, and following on in the target in that order, as when a deletion in
+    the contig splits it. Copies that merely touch or overlap by a few bases stay apart, even copies of the same target.
+    Grouping is transitive.
+
+    Args:
+        alignments: The alignments on one contig.
+        tolerance: Above 0, alignments up to this many bp apart on the contig are also one group.
+
+    Returns:
+        Each group's indices into `alignments`, in contig order, groups ordered by their first alignment.
+    """
+    order = np.lexsort((alignments.t_ends, alignments.t_starts))
+    t_s, t_e = alignments.t_starts[order], alignments.t_ends[order]
+    q_s, q_e = alignments.q_starts[order], alignments.q_ends[order]
+    names, strands = alignments.q_names[order], alignments.strands[order]
+    n = len(order)
     parent = list(range(n))
 
     def root(i: int) -> int:
@@ -186,20 +201,26 @@ def same_copy_groups(intervals: 'IntervalBatch', tolerance: int = 0) -> list[np.
             i = parent[i]
         return i
 
-    starts, ends = intervals.starts, intervals.ends
+    def pieces_of_one_alignment(i: int, j: int) -> bool:
+        """j starts at or after i on the contig and touches it; do they follow on in the target, in strand order?"""
+        if names[i] != names[j] or strands[i] != strands[j] or t_s[j] > t_e[i]:
+            return False
+        if _shares_half(q_s[i], q_e[i], q_s[j], q_e[j]):
+            return False  # each covers the same part of the target, so two copies
+        return bool(q_s[j] > q_s[i]) if strands[i] != Strand.REVERSE else bool(q_s[j] < q_s[i])
+
     for i in range(n):
         for j in range(i + 1, n):
-            if starts[j] > ends[i] + tolerance:
+            if t_s[j] > t_e[i] + tolerance:
                 break  # sorted by start, so no later alignment reaches i either
-            shared = min(ends[i], ends[j]) - starts[j]
-            shorter = min(ends[i] - starts[i], ends[j] - starts[j])
-            if shared >= MIN_SHARED_FRACTION * shorter or (tolerance > 0 and shared >= -tolerance):
+            if (_shares_half(t_s[i], t_e[i], t_s[j], t_e[j]) or pieces_of_one_alignment(i, j)
+                    or (tolerance > 0 and t_s[j] - t_e[i] <= tolerance)):
                 parent[root(j)] = root(i)
 
     groups: dict[int, list[int]] = {}
     for i in range(n):
         groups.setdefault(root(i), []).append(i)
-    return [np.array(g, dtype=np.int64) for g in groups.values()]
+    return [order[g] for g in groups.values()]
 
 
 # Classes --------------------------------------------------------------------------------------------------------------
@@ -451,17 +472,13 @@ class LocusBuilder:
     def _build_local(self, contig: str, alignment_batch: 'AlignmentBatch', gene_intervals: 'IntervalBatch') -> list[
         'Locus']:
         """
-        Identifies loci within a single contig: one per group of alignments that share their bases (see
+        Identifies loci within a single contig: one per IS copy its alignments lie on (see
         `same_copy_groups`), so two IS copies that only touch are two loci, each with its own strand and sides (#57).
         """
         loci = []
-        aln_intervals = alignment_batch.to_intervals().sort()
-
-        for group in same_copy_groups(aln_intervals, self.locus_tolerance):
-            # Map the sorted spatial indices back to the original alignment batch
-            orig_indices = aln_intervals.original_indices[group]
-            targets = [alignment_batch.get_record(idx) for idx in orig_indices]
-            macro = Interval(int(aln_intervals.starts[group].min()), int(aln_intervals.ends[group].max()))
+        for group in same_copy_groups(alignment_batch, self.locus_tolerance):
+            targets = [alignment_batch.get_record(idx) for idx in group]
+            span = Interval(int(alignment_batch.t_starts[group].min()), int(alignment_batch.t_ends[group].max()))
 
             target_features = [
                 GenomicFeature(t.q_name, self.target_feature_type,
@@ -472,33 +489,33 @@ class LocusBuilder:
 
             # Collapse mode's copy number is set once every locus is built (see assign_copy_numbers)
             locus = Locus(
-                id=f"locus_{uuid4().hex[:8]}", contig=contig, start=macro.start, end=macro.end,
+                id=f"locus_{uuid4().hex[:8]}", contig=contig, start=span.start, end=span.end,
                 targets=target_features, passengers=[], upstream_flanks=[], downstream_flanks=[],
                 fractional_depth=1.0 if self.genome.has_depth else None
             )
 
-            # Determine macro target context bounds
+            # The locus is read on its first target's strand
             primary_strand = Strand(targets[0].strand)
-            macro_bounds = (macro.start, macro.end)
+            span_bounds = (span.start, span.end)
 
-            internal_indices = gene_intervals.query(macro.start, macro.end)
+            internal_indices = gene_intervals.query(span.start, span.end)
             for idx in internal_indices:
                 locus.passengers.append(
                     self._resolve_relation(contig, idx, gene_intervals, Context.INSIDE, 0, 0, primary_strand,
-                                           macro_bounds))
+                                           span_bounds))
 
             if primary_strand == Strand.REVERSE:
-                u_dir, u_bound = 1, macro.end
-                d_dir, d_bound = -1, macro.start
+                u_dir, u_bound = 1, span.end
+                d_dir, d_bound = -1, span.start
             else:
-                u_dir, u_bound = -1, macro.start
-                d_dir, d_bound = 1, macro.end
+                u_dir, u_bound = -1, span.start
+                d_dir, d_bound = 1, span.end
 
             claimed: set[tuple[str, int]] = set()
             self._extract_flanks(contig, u_bound, u_dir, Context.UPSTREAM, gene_intervals, locus.upstream_flanks,
-                                 primary_strand, macro_bounds, claimed)
+                                 primary_strand, span_bounds, claimed)
             self._extract_flanks(contig, d_bound, d_dir, Context.DOWNSTREAM, gene_intervals, locus.downstream_flanks,
-                                 primary_strand, macro_bounds, claimed)
+                                 primary_strand, span_bounds, claimed)
 
             loci.append(locus)
 
