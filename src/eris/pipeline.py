@@ -14,7 +14,7 @@ from mappy import ThreadBuffer
 from pyfgs import GeneFinder, Model, Gene, Mutation
 
 from eris.io import TargetDatabase, GenomeAssembly, gene_id
-from eris.graph import TopologyEngine, Edge, Branch
+from eris.graph import TopologyEngine, Edge, Branch, OVERLAP_SLACK
 from eris.alignment import AlignmentBatch, AlignmentRecord, pooled_identity
 from eris.interval import IntervalBatch, Context, Strand, Interval
 from eris.constants import FeatureType, Orientation, Effect, DEFAULT_MAX_FLANK_DISTANCE
@@ -377,6 +377,33 @@ class LocusBuilder:
             return 0
         return max(0, int(ends[entering].max()) - e.overlap)
 
+    def _target_past_contig_end(self, records: Iterable['AlignmentRecord'], walk_direction: int) -> int:
+        """
+        How much of a locus's target runs on past the contig end a flank walk leaves by (#66): the target bases an
+        alignment leaves unaligned at that end, when it reaches the end within the largest overlap of a link leaving
+        it plus OVERLAP_SLACK and those bases are more than the contig has left, so the rest of the copy is on the next
+        contig. Of several alignments that do, the one nearest the end counts. 0 if none does: an alignment that stops
+        inside the contig, or short of it by more than its unaligned bases, is a truncated copy, whose missing bases
+        are nowhere. Synthetic stitch records are left out: they overshoot by one overlap.
+        """
+        exit_strand = Strand.FORWARD if walk_direction == 1 else Strand.REVERSE
+        best: Optional[tuple[int, int]] = None  # (gap to the contig end, target bases past the alignment there)
+        for rec in records:
+            if rec.idx == -1:
+                continue
+            tolerance = self.topology_engine.exit_overlap(rec.t_name, exit_strand) + OVERLAP_SLACK
+            gap = rec.t_length - rec.t_end if walk_direction == 1 else rec.t_start
+            if gap > tolerance:
+                continue
+            # The target's own 3' end lies past the contig end it is read towards, its 5' end past the other
+            reads_towards = (rec.strand == Strand.FORWARD) == (walk_direction == 1)
+            past = rec.q_length - rec.q_end if reads_towards else rec.q_start
+            if past <= gap:
+                continue  # the rest of the target would fit on this contig, where it does not align
+            if best is None or (gap, -past) < (best[0], -best[1]):
+                best = (gap, past)
+        return 0 if best is None else best[1]
+
     def _resolve_relation(self, contig: str, idx: int, interval_batch: 'IntervalBatch',
                           spatial: Context, dist: int, topo: int, target_strand: Strand,
                           target_bounds: tuple[int, int]) -> FeatureRelation:
@@ -438,7 +465,8 @@ class LocusBuilder:
     def _extract_flanks(self, contig: str, boundary: int, walk_direction: int,
                         context: Context, intervals: Optional['IntervalBatch'], dest_list: list,
                         target_strand: Strand, target_bounds: tuple[int, int], claimed: set[tuple[str, int]],
-                        branch_links: Iterable[Edge] = (), blocked: frozenset[str] = frozenset()):
+                        branch_links: Iterable[Edge] = (), blocked: frozenset[str] = frozenset(),
+                        target_past_end: int = 0):
         """
         Walks the contig (and graph) from a boundary to find flanking features. `claimed` holds the genes the graph
         walks have already reported for this locus (see TopologyEngine.traverse); start a new one for each locus.
@@ -448,6 +476,9 @@ class LocusBuilder:
         the hub's edge, where the link leaves it, plus any target the copy carries onto the branch's first contig (#65).
         The graph walk never enters a `blocked` contig. A gene across a link that runs back over the target's end is
         0 bp away and overlaps the target's start (upstream) or end (downstream), as a local gene would (#64).
+        `target_past_end` is how much of the target runs on past the contig end the walk leaves by (see
+        `_target_past_contig_end`): flanks across the graph are measured from where the target ends, not the boundary
+        (#66). Local flanks are not: the target's alignment then reaches the contig end, so there are none on that side.
         """
         rem_hops = self.max_feature_hops
         exit_strand = Strand.REVERSE if walk_direction == -1 else Strand.FORWARD
@@ -473,15 +504,17 @@ class LocusBuilder:
                     rem_hops -= 1
 
         # 2. Graph Spillover
-        # The walk reads the contig along its direction from 0, so the boundary sits here in its coordinates
+        # The walk reads the contig along its direction from 0, so the boundary sits here in its coordinates, and
+        # the target ends this far past it, on the next contig if its alignment runs off this one
         walk_boundary = boundary if walk_direction == 1 else self.genome.contig_lengths[contig] - boundary
-        # The link's source contig, in the hub, is placed to end at the boundary, then pulled back by the target its
+        target_end = walk_boundary + target_past_end
+        # The link's source contig, in the hub, is placed to end at the target's end, then pulled back by the target its
         # copy carries onto the next contig, so a flank across the link is measured from that copy's end of the target
         branches = [Branch(e, self.max_feature_hops,
-                           walk_boundary - self.genome.contig_lengths[e.u] - self._target_past_link(e))
+                           target_end - self.genome.contig_lengths[e.u] - self._target_past_link(e))
                     for e in branch_links]
         if rem_hops > 0 or branches:
-            reach = None if limit is None else walk_boundary + limit
+            reach = None if limit is None else target_end + limit
             for s_ctg, node_depth, batch in self.topology_engine.traverse(contig, exit_strand, rem_hops, claimed,
                                                                           reach, branches, blocked):
                 across_origin = s_ctg == contig and contig in self.topology_engine.circular
@@ -492,7 +525,7 @@ class LocusBuilder:
                         continue
                     # The traversal counts each link's overlap once, so a negative gap is a gene that runs back
                     # across the target's end, such as one starting in the overlap of the next contig (#64)
-                    d = batch.starts[i] - walk_boundary
+                    d = batch.starts[i] - target_end
                     spatial = context
                     if d < 0:
                         # Upstream crosses the target's start and downstream its end, in the target's direction, as
@@ -549,9 +582,11 @@ class LocusBuilder:
 
             claimed: set[tuple[str, int]] = set()
             self._extract_flanks(contig, u_bound, u_dir, Context.UPSTREAM, gene_intervals, locus.upstream_flanks,
-                                 primary_strand, span_bounds, claimed)
+                                 primary_strand, span_bounds, claimed,
+                                 target_past_end=self._target_past_contig_end(targets, u_dir))
             self._extract_flanks(contig, d_bound, d_dir, Context.DOWNSTREAM, gene_intervals, locus.downstream_flanks,
-                                 primary_strand, span_bounds, claimed)
+                                 primary_strand, span_bounds, claimed,
+                                 target_past_end=self._target_past_contig_end(targets, d_dir))
 
             loci.append(locus)
 
@@ -601,7 +636,8 @@ class LocusBuilder:
         blocked = frozenset(f.t_name for f in fragments) if u_links or d_links else frozenset()
         self._extract_flanks(
             first.t_name, u_bound, u_dir, Context.UPSTREAM, u_ints, locus.upstream_flanks,
-            Strand(first.strand), (first.t_start, first.t_end), claimed, u_links, blocked
+            Strand(first.strand), (first.t_start, first.t_end), claimed, u_links, blocked,
+            self._target_past_contig_end([first], u_dir)
         )
 
         # 3. DOWNSTREAM FLANKS (Strictly from the last fragment)
@@ -610,7 +646,8 @@ class LocusBuilder:
         v_ints = self.topology_engine.features.get(last.t_name)
         self._extract_flanks(
             last.t_name, v_bound, v_dir, Context.DOWNSTREAM, v_ints, locus.downstream_flanks,
-            Strand(last.strand), (last.t_start, last.t_end), claimed, d_links, blocked
+            Strand(last.strand), (last.t_start, last.t_end), claimed, d_links, blocked,
+            self._target_past_contig_end([last], v_dir)
         )
 
         # 4. INSIDE PASSENGERS (Sweep across ALL fragments, including unaligned synthetic bubbles)
