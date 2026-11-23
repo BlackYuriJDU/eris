@@ -373,8 +373,9 @@ class LocusBuilder:
         if spatial in (Context.OVERLAPPING, Context.OVERLAPPING_START, Context.OVERLAPPING_END):
             effect = Effect.DISRUPTED
 
-        # If the gene was biologically broken by the insertion
-        if raw_pyfgs_gene.insertions or raw_pyfgs_gene.deletions:
+        # If the gene was biologically broken by the insertion. `target_bounds` are on the target's own contig, so a
+        # gene reached across a link (topo > 0) cannot be checked against them (#64).
+        if topo == 0 and (raw_pyfgs_gene.insertions or raw_pyfgs_gene.deletions):
             # Dynamically fetch the sequence from the genome for the mutation checker
             for mut in raw_pyfgs_gene.mutations(bytes(self.genome[contig])):  # type: Mutation
                 dist_to_start = abs(mut.pos - target_bounds[0])
@@ -419,7 +420,8 @@ class LocusBuilder:
         Features further than `max_flank_distance` from the boundary are left out, wherever they lie (#55).
         `branch_links` are the other links leaving a repeat hub on this side, each walked as its own branch with the
         full flank budget (#56); flanks along them are measured from the hub's edge, where the link leaves it.
-        The graph walk never enters a `blocked` contig.
+        The graph walk never enters a `blocked` contig. A gene across a link that runs back over the target's end is
+        0 bp away and overlaps the target's start (upstream) or end (downstream), as a local gene would (#64).
         """
         rem_hops = self.max_feature_hops
         exit_strand = Strand.REVERSE if walk_direction == -1 else Strand.FORWARD
@@ -461,12 +463,19 @@ class LocusBuilder:
                             self.topology_engine.features[contig], batch.original_indices[i], walk_direction,
                             target_bounds):
                         continue
-                    if walk_direction == -1:
-                        d = max(0, boundary + batch.starts[i] - self.genome.contig_lengths[contig])
-                    else:
-                        d = max(0, batch.starts[i] - boundary)
+                    # The traversal counts each link's overlap once, so a negative gap is a gene that runs back
+                    # across the target's end, such as one starting in the overlap of the next contig (#64)
+                    d = batch.starts[i] - walk_boundary
+                    spatial = context
+                    if d < 0:
+                        # Upstream crosses the target's start and downstream its end, in the target's direction, as
+                        # Interval.relate gives a local gene
+                        spatial = Context.OVERLAPPING_START if context == Context.UPSTREAM \
+                            else Context.OVERLAPPING_END
+                        d = 0
                     dest_list.append(
-                        self._resolve_relation(s_ctg, i, batch, context, int(d), node_depth, target_strand, target_bounds)
+                        self._resolve_relation(s_ctg, i, batch, spatial, int(d), node_depth, target_strand,
+                                               target_bounds)
                     )
 
     def _build_local(self, contig: str, alignment_batch: 'AlignmentBatch', gene_intervals: 'IntervalBatch') -> list[

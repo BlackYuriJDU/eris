@@ -297,6 +297,77 @@ def test_flank_two_links_away_counts_each_overlap_once():
     assert [(f.distance_bp, f.topological_dist) for f in locus.downstream_flanks] == [(550, 2)]
 
 
+def _relation_summary(relations):
+    return [(r.feature.id, r.spatial.name, r.distance_bp, r.effect.name) for r in relations]
+
+
+@pytest.mark.parametrize("mode", ["variant", "collapse"])
+@pytest.mark.parametrize("strand, aln_start, side, context", [
+    # A '+' IS ends at ctgA's end; downstream is across the link
+    (Strand.FORWARD, 800, "downstream", "OVERLAPPING_END"),
+    # A '-' IS reads ctgA backwards, so the link past ctgA's end is upstream of it
+    (Strand.REVERSE, 800, "upstream", "OVERLAPPING_START"),
+])
+def test_a_gene_on_the_next_contig_that_runs_back_into_the_is_end_overlaps_it(mode, strand, aln_start, side, context):
+    # 'ctgA+ -> ctgB+' share 100 bp, so ctgB's gene at 30 sits at ctgA's 930, 70 bp inside the IS ending at 1000
+    builder = _flank_builder({"ctgA": 1000, "ctgB": 1000},
+                             [Edge("ctgA", Strand.FORWARD, "ctgB", Strand.FORWARD, overlap=100)],
+                             {"ctgB": (30, 600)}, mode=mode)
+    alignments = {"ctgA": _batch([("IS1", 200, 0, 200, "ctgA", 1000, aln_start, aln_start + 200, 200, 200)],
+                                 [strand])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert _relation_summary(getattr(locus, f"{side}_flanks")) == [("gene_ctgB", context, 0, "DISRUPTED")]
+
+
+@pytest.mark.parametrize("mode", ["variant", "collapse"])
+@pytest.mark.parametrize("strand, side, context", [
+    (Strand.FORWARD, "upstream", "OVERLAPPING_START"),
+    (Strand.REVERSE, "downstream", "OVERLAPPING_END"),
+])
+def test_a_gene_on_the_previous_contig_that_runs_into_the_is_start_overlaps_it(mode, strand, side, context):
+    # 'ctgB+ -> ctgA+' share 100 bp, so ctgA starts at ctgB's 900 and ctgB's gene ending at 970 runs 70 bp into the IS
+    builder = _flank_builder({"ctgA": 1000, "ctgB": 1000},
+                             [Edge("ctgB", Strand.FORWARD, "ctgA", Strand.FORWARD, overlap=100)],
+                             {"ctgB": (300, 970)}, mode=mode)
+    alignments = {"ctgA": _batch([("IS1", 200, 0, 200, "ctgA", 1000, 0, 200, 200, 200)], [strand])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert _relation_summary(getattr(locus, f"{side}_flanks")) == [("gene_ctgB", context, 0, "DISRUPTED")]
+
+
+def test_a_gene_across_a_link_is_not_truncated_by_a_frameshift_at_the_is_coordinates_on_its_own_contig():
+    # ctgB's gene has a frameshift at 805, which is near the IS start, 800, but on ctgA, not ctgB
+    builder = _flank_builder({"ctgA": 1000, "ctgB": 1000},
+                             [Edge("ctgA", Strand.FORWARD, "ctgB", Strand.FORWARD, overlap=100)],
+                             {"ctgB": (300, 900)})
+    builder.genes["ctgB"] = [SimpleNamespace(insertions=[805], deletions=[],
+                                             mutations=lambda seq: [SimpleNamespace(pos=805)])]
+    alignments = {"ctgA": _batch([("IS1", 200, 0, 200, "ctgA", 1000, 800, 1000, 200, 200)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert _relation_summary(locus.downstream_flanks) == [("gene_ctgB", "DOWNSTREAM", 200, "NONE")]
+
+
+@pytest.mark.parametrize("strand, gene, context", [
+    (Strand.FORWARD, (300, 450), "OVERLAPPING_START"),
+    (Strand.FORWARD, (550, 800), "OVERLAPPING_END"),
+    (Strand.REVERSE, (550, 800), "OVERLAPPING_START"),
+    (Strand.REVERSE, (300, 450), "OVERLAPPING_END"),
+])
+def test_a_local_gene_overlapping_the_is_upstream_end_overlaps_its_start_and_downstream_end_its_end(strand, gene, context):
+    # The graph walk follows the same convention: START is the upstream end in the IS's own direction
+    builder = _flank_builder({"ctgA": 10000}, [], {"ctgA": gene})
+    alignments = {"ctgA": _batch([("IS1", 200, 0, 200, "ctgA", 10000, 400, 600, 200, 200)], [strand])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert _relation_summary(locus.passengers) == [("gene_ctgA", context, 0, "DISRUPTED")]
+
+
 @pytest.mark.parametrize("limit, reported", [(499, False), (500, True)])
 @pytest.mark.parametrize("gene, aln_start, side", [((1500, 1800), 800, "downstream"), ((100, 300), 800, "upstream")])
 def test_a_flank_on_the_targets_own_contig_is_reported_only_within_the_max_flank_distance(
