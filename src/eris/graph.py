@@ -555,6 +555,10 @@ class TopologyEngine:
         # If it reaches a dead end before finding the target anchor
         return []
 
+    def exit_overlap(self, contig: str, strand: Strand) -> int:
+        """The largest overlap of any link leaving `contig` read on `strand`, so by its end or, on '-', its start."""
+        return self._end_overlap.get((contig, strand, True), 0)
+
     def links_leaving(self, hub: dict[str, Strand], side: int) -> list[Edge]:
         """The links that leave a repeat hub on one side (see `links_leaving`)."""
         return links_leaving(self._graph, hub, side)

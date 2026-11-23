@@ -338,6 +338,86 @@ def test_a_gene_on_the_previous_contig_that_runs_into_the_is_start_overlaps_it(m
     assert _relation_summary(getattr(locus, f"{side}_flanks")) == [("gene_ctgB", context, 0, "DISRUPTED")]
 
 
+@pytest.mark.parametrize("mode", ["variant", "collapse"])
+@pytest.mark.parametrize("strand, aln, side", [
+    # A '+' IS aligns its first 300 of 500 bp up to 5 bp short of ctgA's end, so its last 200 bp run on into ctgB
+    (Strand.FORWARD, (0, 300), "downstream"),
+    # Read backwards, its last 300 bp end there, so its first 200 bp run on into ctgB, upstream of it
+    (Strand.REVERSE, (200, 500), "upstream"),
+])
+def test_a_flank_across_a_link_is_measured_from_where_the_target_ends_when_its_alignment_runs_off_the_contig(
+        mode, strand, aln, side):
+    # ctgB starts at ctgA's 900, so its gene at 500 sits at 1400, 405 bp past the alignment's end at 995: 205 bp past
+    # the target's end 200 bp further on
+    builder = _flank_builder({"ctgA": 1000, "ctgB": 1000},
+                             [Edge("ctgA", Strand.FORWARD, "ctgB", Strand.FORWARD, overlap=100)],
+                             {"ctgB": (500, 800)}, mode=mode)
+    alignments = {"ctgA": _batch([("IS1", 500, *aln, "ctgA", 1000, 695, 995, 300, 300)], [strand])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert [f.distance_bp for f in getattr(locus, f"{side}_flanks")] == [205]
+
+
+def test_a_flank_across_a_link_is_measured_from_the_alignment_end_when_it_stops_inside_the_contig():
+    # The alignment stops 200 bp short of ctgA's end, more than the link's overlap and slack: that copy is truncated,
+    # so its missing 200 bp are not on ctgB, and ctgB's gene at 1400 is 600 bp past the alignment's end at 800
+    builder = _flank_builder({"ctgA": 1000, "ctgB": 1000},
+                             [Edge("ctgA", Strand.FORWARD, "ctgB", Strand.FORWARD, overlap=100)],
+                             {"ctgB": (500, 800)})
+    alignments = {"ctgA": _batch([("IS1", 500, 0, 300, "ctgA", 1000, 500, 800, 300, 300)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert [f.distance_bp for f in locus.downstream_flanks] == [600]
+
+
+def test_a_flank_across_a_link_is_measured_from_the_alignment_end_when_the_rest_of_the_target_would_fit_on_its_contig():
+    # The alignment stops 120 bp short of ctgA's end, within the link's overlap and slack, but leaves only 20 bp of
+    # the target unaligned: they would lie on ctgA, where they do not align, so the copy is truncated and ctgB's gene
+    # at 1400 is 520 bp past the alignment's end at 880
+    builder = _flank_builder({"ctgA": 1000, "ctgB": 1000},
+                             [Edge("ctgA", Strand.FORWARD, "ctgB", Strand.FORWARD, overlap=100)],
+                             {"ctgB": (500, 800)})
+    alignments = {"ctgA": _batch([("IS1", 500, 0, 480, "ctgA", 1000, 400, 880, 480, 480)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert [f.distance_bp for f in locus.downstream_flanks] == [520]
+
+
+def test_a_stitched_path_whose_first_alignment_runs_off_its_contig_is_measured_from_the_targets_start():
+    # IS1 starts on ctgX at its position 200: its first 200 bp run back onto ctgU, whose gene ending at 700 is 300 bp
+    # before ctgX starts, so 100 bp before the target does
+    edges = [Edge("ctgU", Strand.FORWARD, "ctgX", Strand.FORWARD), Edge("ctgX", Strand.FORWARD, "ctgY", Strand.FORWARD)]
+    builder = _flank_builder({"ctgU": 1000, "ctgX": 300, "ctgY": 1000}, edges, {"ctgU": (300, 700)})
+    alignments = {
+        "ctgX": _batch([("IS1", 1000, 200, 500, "ctgX", 300, 0, 300, 300, 300)]),
+        "ctgY": _batch([("IS1", 1000, 500, 1000, "ctgY", 1000, 0, 500, 500, 500)]),
+    }
+
+    [locus] = builder.assemble(alignments)
+
+    assert format_contig_path(locus) == "ctgX+,ctgY+"
+    assert [f.distance_bp for f in locus.upstream_flanks] == [100]
+
+
+def test_a_stitched_path_read_backwards_whose_first_alignment_runs_off_its_contig_is_measured_from_the_targets_start():
+    # As above on '-': IS1 is read along ctgX- then ctgY-, so its first 200 bp run off ctgX's end onto ctgU, whose gene
+    # starting at 300 is 300 bp past ctgX's end, so 100 bp before the target's start
+    edges = [Edge("ctgY", Strand.FORWARD, "ctgX", Strand.FORWARD), Edge("ctgX", Strand.FORWARD, "ctgU", Strand.FORWARD)]
+    builder = _flank_builder({"ctgU": 1000, "ctgX": 300, "ctgY": 1000}, edges, {"ctgU": (300, 700)})
+    alignments = {
+        "ctgX": _batch([("IS1", 1000, 200, 500, "ctgX", 300, 0, 300, 300, 300)], [Strand.REVERSE]),
+        "ctgY": _batch([("IS1", 1000, 500, 1000, "ctgY", 1000, 500, 1000, 500, 500)], [Strand.REVERSE]),
+    }
+
+    [locus] = builder.assemble(alignments)
+
+    assert format_contig_path(locus) == "ctgX-,ctgY-"
+    assert [f.distance_bp for f in locus.upstream_flanks] == [100]
+
+
 def test_a_gene_across_a_link_is_not_truncated_by_a_frameshift_at_the_is_coordinates_on_its_own_contig():
     # ctgB's gene has a frameshift at 805, which is near the IS start, 800, but on ctgA, not ctgB
     builder = _flank_builder({"ctgA": 1000, "ctgB": 1000},

@@ -766,7 +766,7 @@ KNOWN_ASSIGNMENT_ERRORS["complete", "variant"] = KNOWN_ASSIGNMENT_ERRORS["comple
 # found relations scored with the own_copy universe; each one's distance is read off a locus covering its copy. A new
 # disagreement fails, and so does one that now agrees, until this table is updated. Some stay for good: the BED's IS
 # ends do not match where the database IS aligns for ISEc12 (60-72 bp inside), ISCfr4 (30 and 119 bp) and ISEc22
-# (47 bp), the complete genome's every disagreement, and for IS200 and ISSd1/IS600 (38-95 bp).
+# (47 bp), the complete genome's every disagreement.
 KNOWN_DISTANCE_BAND_ERRORS = {
     ("complete", "collapse"): {
         ("ISCfr4", "downstream", "HG941718.1_1366518_1369175"),
@@ -777,26 +777,17 @@ KNOWN_DISTANCE_BAND_ERRORS = {
     },
     ("fragmented", "collapse"): {
         ("IS1A", "downstream", "1236016_212_325"),
-        ("IS3411", "upstream", "1243600_18433_18540"),
-        ("IS3411", "upstream", "1244656_358_903"),
         ("ISCfr4", "downstream", "1245002_72313_74970"),
         ("ISEc12", "upstream", "1233030_2_316"),
     },
     ("fragmented", "variant"): {
         ("IS1A", "downstream", "1236016_212_325"),
-        ("IS3411", "upstream", "1243600_18433_18540"),
-        ("IS600", "upstream", "1206755_158_400"),
         ("ISCfr4", "downstream", "1245002_72313_74970"),
         ("ISEc12", "downstream", "1242518_223_333"),
         ("ISEc12", "upstream", "1233030_2_316"),
         ("ISEc12", "upstream", "1243278_59_1681"),
     },
     ("real", "collapse"): {
-        ("IS1A", "upstream", "2417355_2183_2452"),
-        ("IS1A", "upstream", "2418619_30_158"),
-        ("IS1A", "upstream", "2418902_177_434"),
-        ("IS1A", "upstream", "2421112_281686_282312"),
-        ("IS1X1", "downstream", "2420468_1_114"),
         ("IS26", "downstream", "2418527_3_512"),
         ("ISCfr4", "downstream", "2418565_61906_64563"),
         ("ISEc12", "upstream", "2420380_1_165"),
