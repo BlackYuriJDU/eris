@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Callable, NamedTuple, Optional, TYPE_CHECKING
 
-from eris.graph import Edge, Graph
+from eris.graph import Edge, Graph, links_leaving
 from eris.interval import Strand
 
 if TYPE_CHECKING:
@@ -147,8 +147,7 @@ def _walk_out(graph: Graph, hub: dict[str, Strand], lengths: dict[str, int],
     ends = {}
     for side, sign in (("upstream", -1), ("downstream", 1)):
         found: dict[tuple[str, Strand], WalkEnd] = {}
-        stack = [(edge, 0) for contig, strand in hub.items() for edge in graph.get_neighbors(contig)
-                 if edge.u_strand == strand * sign]
+        stack = [(edge, 0) for edge in links_leaving(graph, hub, sign)]
         seen = set()
         while stack:
             edge, used = stack.pop()
