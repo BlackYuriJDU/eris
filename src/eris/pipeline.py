@@ -160,6 +160,48 @@ class Locus:
         tail = len(genome[last.contig]) - last.end if last.strand != Strand.REVERSE else last.start
         return path[head:len(path) - tail]
 
+# Functions ------------------------------------------------------------------------------------------------------------
+MIN_SHARED_FRACTION = 0.5  # Of the shorter alignment, for two alignments to be one IS copy
+
+
+def same_copy_groups(intervals: 'IntervalBatch', tolerance: int = 0) -> list[np.ndarray]:
+    """
+    Groups the alignments on one contig by the IS copy they lie on, as index arrays into `intervals`, which must be
+    sorted, in order of their first alignment. Two alignments are one copy when they share at least half the shorter
+    one's bases, as near-identical targets (IS1A, IS1R) aligning to one copy do; copies that merely touch or overlap
+    by a few bases stay apart (#57, docs/adr/0006). A `tolerance` above 0 also joins alignments up to that many bp
+    apart. Grouping is transitive.
+
+    Example:
+        >>> batch = IntervalBatch.from_intervals([Interval(0, 1000), Interval(2, 1000), Interval(998, 2000)])
+        >>> [g.tolist() for g in same_copy_groups(batch)]
+        [[0, 1], [2]]
+    """
+    n = len(intervals)
+    parent = list(range(n))
+
+    def root(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    starts, ends = intervals.starts, intervals.ends
+    for i in range(n):
+        for j in range(i + 1, n):
+            if starts[j] > ends[i] + tolerance:
+                break  # sorted by start, so no later alignment reaches i either
+            shared = min(ends[i], ends[j]) - starts[j]
+            shorter = min(ends[i] - starts[i], ends[j] - starts[j])
+            if shared >= MIN_SHARED_FRACTION * shorter or (tolerance > 0 and shared >= -tolerance):
+                parent[root(j)] = root(i)
+
+    groups: dict[int, list[int]] = {}
+    for i in range(n):
+        groups.setdefault(root(i), []).append(i)
+    return [np.array(g, dtype=np.int64) for g in groups.values()]
+
+
 # Classes --------------------------------------------------------------------------------------------------------------
 class LocusBuilder:
     """
@@ -185,7 +227,7 @@ class LocusBuilder:
             genome: The full assembly and metadata.
             target_feature_type: Classification for primary alignment targets.
             max_feature_hops: Max contextual genes to look for in each direction.
-            locus_tolerance: bp tolerance for merging adjacent targets.
+            locus_tolerance: Alignments up to this many bp apart share a locus; at 0, only those on one IS copy do.
             features: Dictionary of GenomicFeatures per contig.
             genes: Dictionary of PyFGS Gene objects per contig.
             max_flank_distance: Max distance (bp) from the target to a flank, on its own contig or across the
@@ -408,20 +450,18 @@ class LocusBuilder:
 
     def _build_local(self, contig: str, alignment_batch: 'AlignmentBatch', gene_intervals: 'IntervalBatch') -> list[
         'Locus']:
-        """Identifies loci within a single contig."""
+        """
+        Identifies loci within a single contig: one per group of alignments that share their bases (see
+        `same_copy_groups`), so two IS copies that only touch are two loci, each with its own strand and sides (#57).
+        """
         loci = []
         aln_intervals = alignment_batch.to_intervals().sort()
-        macro_intervals = aln_intervals.merge(tolerance=self.locus_tolerance)
 
-        for i in range(len(macro_intervals)):
-            macro = macro_intervals[i]
-            target_indices = aln_intervals.query(macro.start, macro.end)
-
+        for group in same_copy_groups(aln_intervals, self.locus_tolerance):
             # Map the sorted spatial indices back to the original alignment batch
-            orig_indices = aln_intervals.original_indices[target_indices]
-
-            if not (targets := [alignment_batch.get_record(idx) for idx in orig_indices]):
-                continue
+            orig_indices = aln_intervals.original_indices[group]
+            targets = [alignment_batch.get_record(idx) for idx in orig_indices]
+            macro = Interval(int(aln_intervals.starts[group].min()), int(aln_intervals.ends[group].max()))
 
             target_features = [
                 GenomicFeature(t.q_name, self.target_feature_type,
