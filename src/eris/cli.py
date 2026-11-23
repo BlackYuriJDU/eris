@@ -119,7 +119,8 @@ def main():
                         help='Maximum distance (bp) from a target to a contextual gene, on the target\'s own contig '
                              'or across the assembly graph; caps how far --hops can reach')
     pipeline_args.add_argument('-l', '--tolerance', type=int, default=0, metavar='',
-                        help='Distance tolerance (bp) for merging clustered target alignments')
+                        help='Also merge target alignments up to this many bp apart into one locus; at 0, only '
+                             'alignments sharing at least half the shorter one share a locus')
     pipeline_args.add_argument('-t', '--max-workers', type=int, default=None, metavar='',
                         help='Maximum number of worker threads for alignment and CDS prediction')
     pipeline_args.add_argument('-m', '--mode', choices=['variant', 'collapse'], default='variant',

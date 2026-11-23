@@ -12,15 +12,15 @@ from eris.io import GenomeAssembly, format_contig_path
 from eris.pipeline import LocusBuilder, Locus, GenomicFeature, LocationSegment
 
 
-def _batch(rows):
-    """rows: (q_name, q_length, q_start, q_end, t_name, t_length, t_start, t_end, length, match)"""
+def _batch(rows, strands=None):
+    """rows: (q_name, q_length, q_start, q_end, t_name, t_length, t_start, t_end, length, match); all '+' by default"""
     qn, ql, qs, qe, tn, tl, ts, te, bl, ml = zip(*rows)
     return AlignmentBatch(
         q_names=np.array(qn, dtype=object), q_lengths=np.array(ql, dtype=np.int32),
         q_starts=np.array(qs, dtype=np.int32), q_ends=np.array(qe, dtype=np.int32),
         t_names=np.array(tn, dtype=object), t_lengths=np.array(tl, dtype=np.int32),
         t_starts=np.array(ts, dtype=np.int32), t_ends=np.array(te, dtype=np.int32),
-        strands=np.array([Strand.FORWARD] * len(rows), dtype=np.int8),
+        strands=np.array(strands or [Strand.FORWARD] * len(rows), dtype=np.int8),
         lengths=np.array(bl, dtype=np.int32), matches=np.array(ml, dtype=np.int32),
         mismatches=np.array([b - m for b, m in zip(bl, ml)], dtype=np.int32),
         qualities=np.array([60] * len(rows), dtype=np.int32),
@@ -64,6 +64,77 @@ def test_assemble_pools_identity_of_a_stitched_locus_over_its_real_fragments():
     assert [t.identity for locus in kept for t in locus.targets] == [pytest.approx(0.90)]
 
     assert list(builder.assemble(alignments, min_coverage=0.30, min_identity=0.95)) == []
+
+
+# Adjacent IS copies (#57) ------------------------------------------------------------------------------------------
+def test_two_abutting_copies_of_different_iss_are_two_loci_each_with_its_own_strand_and_sides():
+    # ISEc9 on '+' at 1000-2000 and IS5 on '-' at 1998-3200 share 2 bp, as in EC958. Each is the other's flank on
+    # the shared side: ISEc9's downstream and IS5's downstream (IS5 is read backwards, so its downstream is leftwards)
+    genes = [(100, 900), (1100, 1900), (2100, 3100), (3300, 4000)]  # left flank, ISEc9 tnp, IS5 tnp, right flank
+    intervals = {"ctgA": IntervalBatch(np.array([s for s, _ in genes]), np.array([e for _, e in genes]),
+                                       np.array([Strand.FORWARD] * len(genes), dtype=np.int8))}
+    features = {"ctgA": [GenomicFeature(f"g{s}", FeatureType.CDS, [LocationSegment("ctgA", s, e, Strand.FORWARD)])
+                         for s, e in genes]}
+    no_indels = {"ctgA": [SimpleNamespace(insertions=[], deletions=[]) for _ in genes]}
+    builder = _builder({"ctgA": 5000}, intervals=intervals, max_feature_hops=1, features=features, genes=no_indels)
+    alignments = {"ctgA": _batch([("ISEc9", 1000, 0, 1000, "ctgA", 5000, 1000, 2000, 1000, 1000),
+                                  ("IS5", 1202, 0, 1202, "ctgA", 5000, 1998, 3200, 1202, 1202)],
+                                 strands=[Strand.FORWARD, Strand.REVERSE])}
+
+    loci = sorted(builder.assemble(alignments), key=lambda locus: locus.start)
+
+    def sides(locus):
+        return ([f.feature.id for f in locus.upstream_flanks], [f.feature.id for f in locus.downstream_flanks])
+    assert [([t.id for t in locus.targets], locus.start, locus.end) for locus in loci] == [
+        (["ISEc9"], 1000, 2000), (["IS5"], 1998, 3200)]
+    assert [locus.targets[0].bounding_strand for locus in loci] == [Strand.FORWARD, Strand.REVERSE]
+    assert [sides(locus) for locus in loci] == [(["g100"], ["g2100"]), (["g3300"], ["g1100"])]
+    assert [[p.feature.id for p in locus.passengers] for locus in loci] == [["g1100"], ["g2100"]]
+
+
+def test_two_near_identical_targets_on_one_copy_are_one_locus():
+    # IS1A and IS1R align to the same 768 bp copy, a few bases apart at the ends
+    builder = _builder({"ctgA": 5000})
+    alignments = {"ctgA": _batch([("IS1A", 768, 0, 768, "ctgA", 5000, 1000, 1768, 768, 760),
+                                  ("IS1R", 768, 0, 766, "ctgA", 5000, 1002, 1768, 766, 750)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert (sorted(t.id for t in locus.targets), locus.start, locus.end) == (["IS1A", "IS1R"], 1000, 1768)
+
+
+def test_two_abutting_copies_of_the_same_is_are_two_loci():
+    builder = _builder({"ctgA": 5000})
+    alignments = {"ctgA": _batch([("IS26", 820, 0, 820, "ctgA", 5000, 1000, 1820, 820, 820),
+                                  ("IS26", 820, 0, 820, "ctgA", 5000, 1820, 2640, 820, 820)])}
+
+    loci = builder.assemble(alignments)
+
+    assert sorted((locus.start, locus.end) for locus in loci) == [(1000, 1820), (1820, 2640)]
+
+
+@pytest.mark.parametrize("strand, query_ranges", [(Strand.FORWARD, [(0, 500), (520, 1000)]),
+                                                  (Strand.REVERSE, [(520, 1000), (0, 500)])])
+def test_one_copy_split_into_two_touching_alignments_of_its_target_is_one_locus(strand, query_ranges):
+    # A deletion in the contig splits IS1's alignment in two: the pieces touch on the contig and follow on in IS1
+    builder = _builder({"ctgA": 5000})
+    (q1s, q1e), (q2s, q2e) = query_ranges
+    alignments = {"ctgA": _batch([("IS1", 1000, q1s, q1e, "ctgA", 5000, 1000, 1500, 500, 500),
+                                  ("IS1", 1000, q2s, q2e, "ctgA", 5000, 1500, 1980, 480, 480)], strands=[strand] * 2)}
+
+    [locus] = builder.assemble(alignments)
+
+    assert (locus.start, locus.end) == (1000, 1980)
+
+
+@pytest.mark.parametrize("second_start, expected_loci", [(1500, 1), (1501, 2)])
+def test_alignments_share_a_locus_only_when_they_share_at_least_half_the_shorter_one(second_start, expected_loci):
+    # The shorter alignment is 1000 bp: sharing 500 of its bases is one locus, 499 is two
+    builder = _builder({"ctgA": 5000})
+    alignments = {"ctgA": _batch([("ISa", 1000, 0, 1000, "ctgA", 5000, 1000, 2000, 1000, 1000),
+                                  ("ISb", 1200, 0, 1200, "ctgA", 5000, second_start, second_start + 1200, 1200, 1200)])}
+
+    assert len(list(builder.assemble(alignments))) == expected_loci
 
 
 def test_stitched_locus_reports_the_strand_each_contig_is_read_on():

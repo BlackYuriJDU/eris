@@ -61,7 +61,7 @@ eris -i assembly.gfa -d targets.fasta -o results/sample_A
 * `-f`, `--feature-type`: The type of feature to annotate (default: `CDS`).
 * `--hops`: Maximum number of contextual genes to sweep upstream/downstream (default: `3`). In collapse mode the budget applies along each branch of the assembly graph, so every copy of a collapsed repeat gets its own flanks; in variant mode each copy is already its own locus, and the budget is shared across branches.
 * `--max-flank-distance`: Maximum distance in base pairs from a target to a contextual gene (default: `5000`). It applies on the target's own contig and across the assembly graph alike, so a complete genome and a fragmented assembly follow the same rule: `--hops` caps how many flanks are reported, this caps how far away they can be.
-* `--tolerance`: Distance tolerance in base pairs for merging clustered alignments (default: `0`).
+* `--tolerance`: Target alignments up to this many base pairs apart are merged into one locus (default: `0`). At `0`, alignments share a locus only when they share at least half the shorter alignment, as near-identical targets aligning to one IS copy do. Two IS copies that sit end to end are two loci, each with its own strand and flanks, and each is the other's flank on the shared side.
 * `-c`, `--min-coverage`: Minimum target coverage, a fraction from `0.0` to `1.0`, required to report a locus target (default: `0.3`).
 * `--min-identity`: Minimum target identity (matching bases over aligned bases, gaps counted), a fraction from `0.0` to `1.0`, required to report a locus target (default: `0.0`, no filtering). A stitched locus is kept or dropped on the identity pooled over its fragments.
 

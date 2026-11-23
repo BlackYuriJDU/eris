@@ -391,18 +391,11 @@ KNOWN_RELATION_MISSES = {
         ("IS1X1", "upstream", "EC958_RS30140"): "gene",
         ("IS2", "downstream", "EC958_RS30340"): "gene",
         ("IS26", "downstream", "EC958_RS25830"): "budget",
-        ("IS26", "downstream", "EC958_RS25840"): "budget",
         ("IS26", "downstream", "EC958_RS26485"): "gene",
         ("IS26", "downstream", "EC958_RS29660"): "gene",
         ("IS26", "upstream", "EC958_RS29475"): "gene",
-        ("IS30", "downstream", "EC958_RS16655"): "gene",
         ("IS3411", "upstream", "EC958_RS29355"): "gene",
-        ("IS5", "downstream", "EC958_RS24665"): "gene",
-        ("IS5", "upstream", "EC958_RS24675"): "gene",
-        ("IS600", "downstream", "EC958_RS16660"): "gene",
         ("IS600", "downstream", "EC958_RS28175"): "gene",
-        ("IS600", "upstream", "EC958_RS16650"): "gene",
-        ("IS600", "upstream", "EC958_RS24690"): "gene",
         ("IS609", "downstream", "EC958_RS10865"): "gene",
         ("IS609", "upstream", "EC958_RS10860"): "gene",
         ("IS6100", "upstream", "EC958_RS29565"): "gene",
@@ -410,10 +403,7 @@ KNOWN_RELATION_MISSES = {
         ("ISEc23", "downstream", "EC958_RS01090"): "gene",
         ("ISEc23", "downstream", "EC958_RS11750"): "gene",
         ("ISEc52", "downstream", "EC958_RS28255"): "gene",
-        ("ISEc52", "downstream", "EC958_RS29425"): "gene",
-        ("ISEc52", "upstream", "EC958_RS24680"): "gene",
         ("ISEc53", "downstream", "EC958_RS25065"): "gene",
-        ("ISEc9", "downstream", "EC958_RS24670"): "gene",
         ("ISSen1", "downstream", "EC958_RS24890"): "gene",
         ("ISSen1", "upstream", "EC958_RS29720"): "gene",
         ("ISSen10", "downstream", "EC958_RS20820"): "gene",
@@ -426,8 +416,6 @@ KNOWN_RELATION_MISSES = {
         ("IS1X1", "upstream", "EC958_RS30140"): "gene",
         ("IS2", "downstream", "EC958_RS30340"): "gene",
         ("IS3411", "downstream", "EC958_RS20830"): "gene",
-        ("IS5", "downstream", "EC958_RS24665"): "gene",
-        ("IS5", "upstream", "EC958_RS24675"): "gene",
         ("IS600", "upstream", "EC958_RS16650"): "gene",
         ("IS609", "downstream", "EC958_RS10865"): "gene",
         ("IS609", "upstream", "EC958_RS10860"): "gene",
@@ -444,16 +432,16 @@ KNOWN_RELATION_MISSES = {
         ("ISEc52", "downstream", "EC958_RS29425"): "gene",
         ("ISEc52", "upstream", "EC958_RS24680"): "gene",
         ("ISEc53", "downstream", "EC958_RS25065"): "gene",
-        ("ISEc9", "downstream", "EC958_RS24670"): "gene",
         ("ISSen1", "downstream", "EC958_RS24890"): "gene",
         ("ISSen1", "upstream", "EC958_RS29720"): "gene",
         ("ISSen10", "downstream", "EC958_RS20820"): "gene",
         ("ISSen10", "upstream", "EC958_RS20830"): "gene",
     },
 }
-# Found relations whose eris gene does not have the RefSeq CDS's sequence; checked on the complete genome only
-# (ISEc52's EC958_RS24680 was one while an unrelated IS3 locus could find it; per isoform group it is a miss)
-KNOWN_NUCLEOTIDE_MISMATCHES = set()
+# Found relations whose eris gene does not have the RefSeq CDS's sequence; checked on the complete genome only.
+# EC958_RS24680 is IS600's transposase, one CDS read through a programmed frameshift; eris calls one of its two ORFs,
+# which covers too little of it. ISEc52 finds it as its upstream flank since adjacent IS copies are separate loci (#57).
+KNOWN_NUCLEOTIDE_MISMATCHES = {("ISEc52", "upstream", "EC958_RS24680")}
 # Floors for (precision, recall) of DISRUPTED or TRUNCATED against truth disrupted; raise them as eris improves
 MIN_DISRUPTED = {"complete": (0.17, 0.42), "fragmented": (0.05, 0.05)}
 
@@ -557,34 +545,16 @@ IS_CONTEXT = 1000  # bp of contig either side of an IS segment, so its placement
 # Every assignment error per (assembly, resolution mode), as {((isoform group, side, eris gene), cause)}, scored with
 # the own_copy universe (ADR 0005). A new error fails, and so does a fixed one or one whose cause changes, until this
 # table is updated. On the complete genome every error is eris's: IS609_1 read on the wrong strand (FP/FN_side);
-# adjacent IS pairs (IS30+ISSd1, ISEcp1+IS5, ISSd1+ISEc52, IS26+ISEcp1) reported as one locus named after its first IS,
-# so the second is FN_undetected, its flank goes to the first (FP_group), and the first misses its neighbour's
-# transposase, its nearest gene on that side; ISSen1 and ISSen10 not found, and ISEc49 called where the BED has no IS;
+# ISSen1 and ISSen10 not found, and ISEc49 called where the BED has no IS;
 # ISCfr4's alignment stops 119 bp short, so a piece of its own transposase is reported as a flank (FP_not_nearest).
 KNOWN_ASSIGNMENT_ERRORS = {
     ("complete", "collapse"): {
-        (("IS26", "downstream", "HG941719.1_37300_38562"), "FN_budget"),
-        (("IS30", "downstream", "HG941718.1_3314442_3315260"), "FN_group"),
         (("IS609", "downstream", "HG941718.1_2104066_2104614"), "FN_side"),
         (("IS609", "upstream", "HG941718.1_2103359_2103856"), "FN_side"),
-        (("IS5", "downstream", "HG941718.1_4937619_4938881"), "FN_undetected"),
-        (("IS5", "upstream", "HG941718.1_4940069_4940200"), "FN_undetected"),
-        (("IS600", "downstream", "HG941718.1_3315272_3315727"), "FN_undetected"),
-        (("IS600", "upstream", "HG941718.1_3313323_3314357"), "FN_undetected"),
-        (("ISEc52", "downstream", "HG941718.1_4944364_4944777"), "FN_undetected"),
-        (("ISEc52", "upstream", "HG941718.1_4943602_4944198"), "FN_undetected"),
-        (("ISEc9", "downstream", "HG941719.1_102501_103217"), "FN_undetected"),
-        (("ISEc9", "upstream", "HG941719.1_38750_38980"), "FN_undetected"),
         (("ISSen1", "downstream", "HG941718.1_4977172_4977423"), "FN_undetected"),
         (("ISSen1", "upstream", "HG941718.1_4976210_4976368"), "FN_undetected"),
         (("ISSen10", "downstream", "HG941718.1_4155982_4156059"), "FN_undetected"),
         (("ISSen10", "upstream", "HG941718.1_4156672_4158180"), "FN_undetected"),
-        (("IS600", "upstream", "HG941718.1_4943602_4944198"), "FN_unreported"),
-        (("ISEc9", "downstream", "HG941718.1_4939087_4940067"), "FN_unreported"),
-        (("IS26", "downstream", "HG941719.1_38750_38980"), "FP_group"),
-        (("IS30", "downstream", "HG941718.1_3315272_3315727"), "FP_group"),
-        (("IS600", "upstream", "HG941718.1_4944364_4944777"), "FP_group"),
-        (("ISEc9", "downstream", "HG941718.1_4940069_4940200"), "FP_group"),
         (("ISCfr4", "downstream", "HG941718.1_1365823_1366380"), "FP_not_nearest"),
         (("ISEc49", "downstream", "HG941718.1_4160353_4160985"), "FP_overcall"),
         (("ISEc49", "downstream", "HG941718.1_4161807_4162394"), "FP_overcall"),
@@ -599,8 +569,6 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("IS609", "downstream", "1244458_193_717"), "FN_side"),
         (("IS609", "upstream", "1244578_149_646"), "FN_side"),
         (("IS3411", "downstream", "1245106_115_594"), "FN_undetected"),
-        (("IS5", "downstream", "1245048_10109_11371"), "FN_undetected"),
-        (("IS5", "upstream", "1245048_12559_12690"), "FN_undetected"),
         (("ISSen1", "downstream", "1245024_2279_2530"), "FN_undetected"),
         (("ISSen1", "upstream", "1245024_1317_1475"), "FN_undetected"),
         (("ISSen10", "downstream", "1245106_3322_3399"), "FN_undetected"),
@@ -613,10 +581,8 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("ISEc23", "downstream", "1243458_2550_2825"), "FN_unreported"),
         (("ISEc23", "upstream", "1245118_80_268"), "FN_unreported"),
         (("ISEc52", "downstream", "1244890_87_500"), "FN_unreported"),
-        (("ISEc9", "downstream", "1245048_11577_12557"), "FN_unreported"),
         (("IS3411", "downstream", "1245106_3322_3399"), "FP_group"),
         (("IS3411", "upstream", "1245106_1201_2709"), "FP_group"),
-        (("ISEc9", "downstream", "1245048_12559_12690"), "FP_group"),
         (("IS1A", "downstream", "1208153_1_267"), "FP_not_nearest"),
         (("IS1A", "upstream", "1171599_3_173"), "FP_not_nearest"),
         (("IS30", "downstream", "1242602_3_80"), "FP_not_nearest"),
@@ -646,8 +612,6 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("IS609", "downstream", "1244458_193_717"), "FN_side"),
         (("IS3411", "downstream", "1245106_115_594"), "FN_undetected"),
         (("IS3411", "upstream", "1244656_358_903"), "FN_undetected"),
-        (("IS5", "downstream", "1245048_10109_11371"), "FN_undetected"),
-        (("IS5", "upstream", "1245048_12559_12690"), "FN_undetected"),
         (("ISSen1", "downstream", "1245024_2279_2530"), "FN_undetected"),
         (("ISSen1", "upstream", "1245024_1317_1475"), "FN_undetected"),
         (("ISSen10", "downstream", "1245106_3322_3399"), "FN_undetected"),
@@ -656,12 +620,10 @@ KNOWN_ASSIGNMENT_ERRORS = {
         (("IS609", "upstream", "1244764_135242_135442"), "FN_unreported"),
         (("ISEc12", "upstream", "1244912_33_491"), "FN_unreported"),
         (("ISEc23", "upstream", "1245118_80_268"), "FN_unreported"),
-        (("ISEc9", "downstream", "1245048_11577_12557"), "FN_unreported"),
         (("IS3411", "downstream", "1245106_3322_3399"), "FP_group"),
         (("IS3411", "upstream", "1245106_1201_2709"), "FP_group"),
         (("IS600", "downstream", "1228204_3_239"), "FP_group"),
         (("IS600", "upstream", "1243600_2_142"), "FP_group"),
-        (("ISEc9", "downstream", "1245048_12559_12690"), "FP_group"),
         (("IS1A", "downstream", "1208153_1_267"), "FP_not_nearest"),
         (("IS1A", "upstream", "1171599_3_173"), "FP_not_nearest"),
         (("IS30", "downstream", "1242602_3_80"), "FP_not_nearest"),
