@@ -777,13 +777,8 @@ KNOWN_DISTANCE_BAND_ERRORS = {
     },
     ("fragmented", "collapse"): {
         ("IS1A", "downstream", "1236016_212_325"),
-        ("IS1X1", "downstream", "1244320_2879_2998"),
-        ("IS200", "downstream", "1244018_138_395"),
         ("IS3411", "upstream", "1243600_18433_18540"),
         ("IS3411", "upstream", "1244656_358_903"),
-        ("IS600", "downstream", "1242486_319_774"),
-        ("IS600", "upstream", "1206755_158_400"),
-        ("IS609", "upstream", "1244764_135242_135442"),
         ("ISCfr4", "downstream", "1245002_72313_74970"),
         ("ISEc12", "upstream", "1233030_2_316"),
     },
@@ -805,7 +800,6 @@ KNOWN_DISTANCE_BAND_ERRORS = {
         ("IS26", "downstream", "2418527_3_512"),
         ("ISCfr4", "downstream", "2418565_61906_64563"),
         ("ISEc12", "upstream", "2420380_1_165"),
-        ("ISEc8", "downstream", "2409674_277_384"),
     },
     ("real", "variant"): {
         ("IS1A", "downstream", "2420448_1187_1312"),
