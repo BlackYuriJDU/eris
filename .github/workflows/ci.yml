@@ -1,0 +1,42 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 is the only version with a Linux pyfgs wheel; others compile pyfgs from Rust
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v7
+
+      # mappy (minimap2) has no Linux wheel and links against zlib
+      - name: Install zlib headers
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
+
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install eris and test dependencies
+        run: uv sync --locked --no-dev --group test
+
+      # data/ is not in git, so the benchmark tests skip here and run only locally
+      - name: Run tests
+        run: uv run --no-sync python -m pytest

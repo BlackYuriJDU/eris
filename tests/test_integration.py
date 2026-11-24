@@ -168,6 +168,8 @@ def _sum_by_group(counts: dict[str, int], groups: dict[str, str]) -> dict[str, i
 @pytest.fixture(scope="module")
 def target_db():
     # Only initialize the Minimap2 database once for the entire module to save time
+    if not (DATA_DIR / "IS.mmi").exists():
+        pytest.skip(f"target database not found in {DATA_DIR}/")
     return TargetDatabase(DATA_DIR / "IS.mmi", FeatureType.CDS, indexing_threads=1)
 
 
