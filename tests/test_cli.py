@@ -131,3 +131,37 @@ def test_eris_warns_about_fasta_input_even_with_quiet(tmp_path, monkeypatch, cap
     assert "Loading" not in err and "Input:" not in err
     header, *rows = (tmp_path / "out_report.tsv").read_text().splitlines()
     assert rows and {dict(zip(header.split("\t"), row.split("\t")))["fractional_depth"] for row in rows} == {"NA"}
+
+
+# --flank-genes and its deprecated alias --hops ------------------------------------------------------------------------
+from eris.cli import build_parser
+
+_REQUIRED = ["-i", "genome.gfa", "-d", "targets.fasta"]
+
+
+def test_flank_genes_defaults_to_three():
+    assert build_parser().parse_args(_REQUIRED).flank_genes == 3
+
+
+@pytest.mark.parametrize("flag", ["--flank-genes", "--hops"])
+def test_flank_genes_and_hops_set_the_same_value(flag):
+    assert build_parser().parse_args(_REQUIRED + [flag, "5"]).flank_genes == 5
+
+
+def test_hops_warns_that_it_is_deprecated_even_with_quiet(capsys):
+    build_parser().parse_args(_REQUIRED + ["--hops", "5", "-q"])
+
+    err = capsys.readouterr().err
+    assert "--hops is deprecated" in err and "--flank-genes" in err
+
+
+def test_flank_genes_gives_no_warning(capsys):
+    build_parser().parse_args(_REQUIRED + ["--flank-genes", "5"])
+
+    assert capsys.readouterr().err == ""
+
+
+def test_help_names_flank_genes_and_not_hops():
+    help_text = build_parser().format_help()
+
+    assert "--flank-genes" in help_text and "--hops" not in help_text

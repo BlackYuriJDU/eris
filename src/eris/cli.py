@@ -31,6 +31,18 @@ class Log:
         self.stream.flush()
 
 
+class _DeprecatedAlias(argparse.Action):
+    """Stores the value like the option it stands in for, and warns that the alias is deprecated."""
+
+    def __init__(self, option_strings, dest, replacement: str, **kwargs):
+        self.replacement = replacement
+        super().__init__(option_strings, dest, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        Log().warn(f"{option_string} is deprecated; use {self.replacement} instead.")
+        setattr(namespace, self.dest, values)
+
+
 # Functions ------------------------------------------------------------------------------------------------------------
 def fraction(value: str) -> float:
     """Argparse type for a fraction from 0.0 to 1.0."""
@@ -85,10 +97,8 @@ def describe_input(genome: 'GenomeAssembly') -> tuple[str, list[str]]:
     return summary, warnings
 
 
-# Main CLI entry-point -------------------------------------------------------------------------------------------------
-def main():
-
-    # Define args ------------------------------------------------------------------------------------------------------
+def build_parser() -> argparse.ArgumentParser:
+    """The command-line parser for eris."""
     parser = argparse.ArgumentParser(
         description='Graph-aware contextual annotation of targeted genomic features',
         usage="%(prog)s -i genome.gfa -d targets.fasta [options]", add_help=False, prog=__package__,
@@ -112,12 +122,16 @@ def main():
                       help='Do not write FNA output for global transcripts (CDS)')
 
     pipeline_args = parser.add_argument_group('⚙️', 'Pipeline arguments')
-    pipeline_args.add_argument('--hops', type=int, default=3, metavar='',
-                        help='Maximum number of contextual genes to sweep upstream/downstream; in collapse mode, '
-                             'along each graph branch, so every copy of a collapsed repeat gets flanks')
+    pipeline_args.add_argument('--flank-genes', type=int, default=3, metavar='',
+                        help='Maximum number of flanking genes to report on each side of a target. It counts genes, '
+                             'not graph steps: genes on the target\'s own contig are counted first, and contigs '
+                             'without genes do not use it up. In collapse mode it applies along each graph branch, '
+                             'so every copy of a collapsed repeat gets flanks')
+    pipeline_args.add_argument('--hops', dest='flank_genes', type=int, action=_DeprecatedAlias,
+                        replacement='--flank-genes', help=argparse.SUPPRESS)
     pipeline_args.add_argument('--max-flank-distance', type=non_negative_int, default=DEFAULT_MAX_FLANK_DISTANCE, metavar='',
                         help='Maximum distance (bp) from a target to a contextual gene, on the target\'s own contig '
-                             'or across the assembly graph; caps how far --hops can reach')
+                             'or across the assembly graph; caps how far --flank-genes can reach')
     pipeline_args.add_argument('-l', '--tolerance', type=int, default=0, metavar='',
                         help='Also merge target alignments up to this many bp apart into one locus; at 0, only '
                              'alignments sharing at least half the shorter one share a locus')
@@ -144,9 +158,14 @@ def main():
                       help='Show version number and exit')
     opts.add_argument('-h', '--help', action='help',
                       help='Show this help message and exit')
+    return parser
+
+
+# Main CLI entry-point -------------------------------------------------------------------------------------------------
+def main():
 
     # Parse args -------------------------------------------------------------------------------------------------------
-    args = parser.parse_args()
+    args = build_parser().parse_args()
     log = Log(quiet=args.quiet)
 
     # Load inputs ------------------------------------------------------------------------------------------------------
@@ -168,7 +187,7 @@ def main():
     from eris.pipeline import Pipeline
 
     # Hook up the OutputManager parameters explicitly
-    with (Pipeline(target_db, args.hops, args.tolerance, args.max_workers, mode=args.mode,
+    with (Pipeline(target_db, args.flank_genes, args.tolerance, args.max_workers, mode=args.mode,
                    min_coverage=args.min_coverage, min_identity=args.min_identity,
                    max_flank_distance=args.max_flank_distance) as pipeline,
           OutputManager(args.outprefix, write_gff=not args.no_gff, write_faa=not args.no_faa, write_fna=not args.no_fna, mode=args.mode) as out):
