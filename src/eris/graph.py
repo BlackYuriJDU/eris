@@ -1,10 +1,10 @@
-from typing import NamedTuple, Iterable, KeysView, Callable, Optional
+from typing import NamedTuple, Iterable, KeysView, Callable
 from collections import defaultdict
 from functools import partial
 
 import numpy as np
 
-from eris.interval import Strand, IntervalBatch
+from eris.interval import Strand
 from eris.alignment import AlignmentBatch, AlignmentRecord
 
 OVERLAP_SLACK = 50  # bp a fragment may stop short of, or overlap, a link beyond the link's own overlap
@@ -55,16 +55,6 @@ def circular_contigs(edges: Iterable[Edge]) -> frozenset[str]:
         else:
             linked_elsewhere.update((edge.u, edge.v))
     return frozenset(self_linked - linked_elsewhere)
-
-
-class Branch(NamedTuple):
-    """
-    One extra start for a flank walk (see TopologyEngine.traverse): a link to walk out along, the flank budget along
-    it, and where the link's source contig starts in the walk's projected coordinates.
-    """
-    edge: Edge
-    budget: int
-    shift: int
 
 
 class Graph:
@@ -172,11 +162,10 @@ class TopologyEngine:
     It provides tools for "stitching" together partial alignments that span
     multiple contigs by finding valid physical paths through the graph.
     """
-    __slots__ = ('_graph', 'contig_lengths', 'contig_depths', 'features', 'mode', '_end_overlap',
-                 'circular')
+    __slots__ = ('_graph', 'contig_lengths', 'contig_depths', 'mode', '_end_overlap', 'circular')
 
     def __init__(self, edges: Iterable[Edge], contig_lengths: dict[str, int], contig_depths: dict[str, float],
-                 features: dict[str, IntervalBatch] = None, mode: str = 'variant', circular: Iterable[str] = ()):
+                 mode: str = 'variant', circular: Iterable[str] = ()):
         """
         Initialize the TopologyEngine.
 
@@ -184,7 +173,6 @@ class TopologyEngine:
             edges: Assembly graph edges.
             contig_lengths: Dictionary mapping contig ID to length in bp.
             contig_depths: Dictionary mapping contig ID to read depth.
-            features: Dictionary mapping contig ID to its annotated intervals.
             mode: 'variant' or 'collapse'.
             circular: Circular contigs, each closed by a self-link among `edges` (ADR 0001).
         """
@@ -198,7 +186,6 @@ class TopologyEngine:
                 self._end_overlap[key] = max(self._end_overlap[key], e.overlap)
         self.contig_lengths: dict[str, int] = contig_lengths
         self.contig_depths: dict[str, float] = contig_depths
-        self.features: dict[str, IntervalBatch] = features or {}
         self.circular: frozenset[str] = frozenset(circular)
 
         self.mode: str = mode
@@ -563,95 +550,9 @@ class TopologyEngine:
         """The links that leave a repeat hub on one side (see `links_leaving`)."""
         return links_leaving(self._graph, hub, side)
 
-    def traverse(self, start_node: str, exit_strand: Strand, hops_needed: int,
-                 claimed: Optional[set[tuple[str, int]]] = None,
-                 reach: Optional[int] = None,
-                 branches: Iterable[Branch] = (),
-                 blocked: frozenset[str] = frozenset()) -> list[tuple[str, int, IntervalBatch]]:
+    def links_from(self, contig: str, strand: Strand) -> list[Edge]:
         """
-        Uses a breadth-first search to traverse the assembly graph.
-
-        Finds neighboring contigs and projects their annotated features into
-        the coordinate space of the starting contig.
-
-        Args:
-            start_node: Starting contig ID.
-            exit_strand: Strand to exit from.
-            hops_needed: Maximum number of features (intervals) to find. In collapse mode this is per branch, so
-                every copy of a collapsed repeat gets flanks; in variant mode it is shared by all branches, as each
-                copy is already its own locus and a budget per branch would only fan its flanks out.
-            claimed: The genes, as (contig, original index), already reported as flanks of the locus this walk is
-                for; the walk skips them and adds the ones it reports. Share it between the walks of one locus, so
-                that no gene is reported twice, but never between loci, or flanks would depend on locus order (#54).
-            reach: If given, the furthest a feature may start, in the projected coordinates (the start contig read
-                along the walk, from 0). Features starting past it are left out and do not use up the budget, and
-                the walk does not enter a contig that starts past it (#55).
-            branches: Further links to walk out along, each with its own budget, as if the walk had already
-                reached their source contig (#56). Collapse mode starts one from every link leaving a repeat hub, so
-                each copy collapsed into it gets flanks; the links are walked in place of adding edges to the graph.
-                Their source contigs are not re-entered.
-            blocked: Contigs the walk never enters, such as those of the stitched path a hub's branches leave from,
-                so a branch cannot loop back into the hub and report the hub's own genes as flanks.
-
-        Returns:
-            list: (contig_id, hop_index, projected_IntervalBatch)
+        The links leaving `contig` read on `strand`, so by its end or, on '-', its start, in the order they were read,
+        each link's complement included.
         """
-        claimed = set() if claimed is None else claimed
-        # (contig, exit strand, budget, hop index, shift, the links to follow or None for all leaving by the exit)
-        queue: list[tuple[str, Strand, int, int, int, Optional[tuple[Edge, ...]]]] = [
-            (start_node, exit_strand, hops_needed, 1, 0, None)]
-        queue += [(b.edge.u, b.edge.u_strand, b.budget, 1, b.shift, (b.edge,)) for b in branches]
-        projected_results = []
-        visited_edges = {(ctg, strand) for ctg, strand, *_ in queue}
-        per_branch = self.mode == 'collapse'
-        wrapped = False
-
-        while queue:
-            curr_ctg, curr_exit, parent_hops, node_depth, shift, links = queue.pop(0)
-            if parent_hops <= 0: continue
-            rem_hops = parent_hops
-
-            for edge in self._graph.get_neighbors(curr_ctg) if links is None else links:
-                if edge.u_strand != curr_exit or edge.v in blocked: continue
-                if per_branch: rem_hops = parent_hops
-
-                v = edge.v
-                # Linked contigs share the edge overlap, so the next contig starts that much before this one ends
-                new_shift = shift + self.contig_lengths[curr_ctg] - edge.overlap
-                if reach is not None and new_shift > reach: continue
-                # The self-link of a circular contig leads back to its start across the origin: go round it once
-                if v in self.circular and is_self_link(edge) and not wrapped:
-                    wrapped = True
-                elif (v, edge.v_strand) in visited_edges:
-                    continue
-                visited_edges.add((v, edge.v_strand))
-
-                if v in self.features:
-                    n_ints = self.features[v]
-                    raw_indices = np.arange(0, min(len(n_ints), rem_hops)) if edge.v_strand == Strand.FORWARD \
-                        else np.arange(max(0, len(n_ints) - rem_hops), len(n_ints))[::-1]
-
-                    if reach is not None:
-                        # Where each feature starts once the contig is read along the walk
-                        starts = n_ints.starts[raw_indices] if edge.v_strand == Strand.FORWARD \
-                            else self.contig_lengths[v] - n_ints.ends[raw_indices]
-                        raw_indices = raw_indices[starts + new_shift <= reach]
-                    valid_indices = [i for i in raw_indices if
-                                     (v, n_ints.original_indices[i]) not in claimed]
-                    if valid_indices:
-                        for i in valid_indices:
-                            claimed.add((v, n_ints.original_indices[i]))
-
-                        batch = n_ints.filter(valid_indices)
-                        flip_len = self.contig_lengths[v] if edge.v_strand == Strand.REVERSE else None
-
-                        projected_batch = batch.project(shift=new_shift, flip_length=flip_len)
-                        projected_results.append((v, node_depth, projected_batch))
-
-                        found_count = len(valid_indices)
-                        rem_hops -= found_count
-
-                if rem_hops > 0:
-                    queue.append((v, edge.v_strand, rem_hops, node_depth + 1, new_shift, None))
-
-        return projected_results
+        return [e for e in self._graph.get_neighbors(contig) if e.u_strand == strand]
