@@ -103,7 +103,8 @@ def test_quirk_a_hop_0_gap_is_measured_from_the_target_span_not_where_the_target
 
 # Across the graph ----------------------------------------------------------------------------------------------------
 def test_downstream_flank_across_a_link_counts_the_overlap_once():
-    # 'ctgA+ -> ctgB+' share 100 bp, so ctgB starts at ctgA's 900 and its gene at 300 sits at 1200 in the joined sequence
+    # 'ctgA+ -> ctgB+' share 100 bp, so ctgB starts at ctgA's 900 and its gene at 300 sits at 1200 in the joined
+    # sequence
     search = _search({"ctgA": 1000, "ctgB": 1000}, [Edge("ctgA", F, "ctgB", F, overlap=100)], {"ctgB": [(300, 600)]})
 
     flanks = search.search(TargetSpan("ctgA", 800, 1000, F))
@@ -395,7 +396,8 @@ _FIRST, _LAST = TargetSpan("a1", 4700, 5000, F), TargetSpan("b1", 0, 300, F)
 
 def _hub(carried=0, blocked=frozenset()):
     return RepeatHub(upstream=(Branch(Edge("hub", R, "a2", R)),),
-                     downstream=(Branch(Edge("hub", F, "b2", F, overlap=100), carried), Branch(Edge("hub", F, "b3", R))),
+                     downstream=(Branch(Edge("hub", F, "b2", F, overlap=100), carried),
+                                 Branch(Edge("hub", F, "b3", R))),
                      blocked=blocked)
 
 

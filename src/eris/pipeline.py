@@ -271,10 +271,12 @@ class LocusBuilder:
         self.gene_intervals = gene_intervals or {}
         self.alignments: dict[str, AlignmentBatch] = {}
         rule = BudgetRule.PER_BRANCH if self._collapse else BudgetRule.SHARED
-        self.flank_search = FlankSearch(topology_engine, self.gene_intervals, max_feature_hops, max_flank_distance, rule)
+        self.flank_search = FlankSearch(topology_engine, self.gene_intervals, max_feature_hops, max_flank_distance,
+                                        rule)
 
     @property
     def _collapse(self) -> bool:
+        """Whether loci are resolved in collapse mode, one per repeat hub, rather than variant mode."""
         return getattr(self.topology_engine, 'mode', 'variant') == 'collapse'
 
     def assemble(self, alignments: dict, min_coverage: float = 0.30, min_identity: float = 0.0) -> Iterable['Locus']:

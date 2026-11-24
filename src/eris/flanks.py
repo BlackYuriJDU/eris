@@ -48,9 +48,14 @@ class Branch(NamedTuple):
 
 class RepeatHub(NamedTuple):
     """
-    The other links leaving a collapse-mode stitched locus's repeat hub, on each side, besides those the search from
-    the locus's own ends already follows. `blocked` contigs are never entered, on either side, so that no branch loops
-    back into the hub and reports its genes as flanks.
+    The other links leaving a collapse-mode stitched locus's repeat hub, besides those the search from the locus's own
+    ends already follows.
+
+    Attributes:
+        upstream: The branches on the upstream side.
+        downstream: The branches on the downstream side.
+        blocked: Contigs never entered, on either side, so that no branch loops back into the hub and reports its genes
+            as flanks.
     """
     upstream: tuple[Branch, ...] = ()
     downstream: tuple[Branch, ...] = ()
