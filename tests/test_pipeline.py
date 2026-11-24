@@ -735,3 +735,169 @@ def test_fractional_depth_is_none_when_the_assembly_has_no_depth(depths, expecte
     loci = list(builder.assemble(alignments, min_coverage=0.30))
 
     assert len(loci) == 2 and {locus.fractional_depth for locus in loci} == {expected}
+
+
+# Flank search characterization (#77) -------------------------------------------------------------------------------
+# Today's behaviour, quirks included, pinned before the flank search moves into its own module. #78 fixes the quirks.
+def _genes_builder(lengths, edges, gene_spans, hops, mode='variant', **builder_args):
+    """gene_spans: contig -> [(start, end)] of its genes, read on '+', in start order; named gene_<contig>_<start>."""
+    intervals = {c: IntervalBatch(np.array([s for s, _ in spans]), np.array([e for _, e in spans]),
+                                  np.array([Strand.FORWARD] * len(spans), dtype=np.int8))
+                 for c, spans in gene_spans.items()}
+    features = {c: [GenomicFeature(f"gene_{c}_{s}", FeatureType.CDS, [LocationSegment(c, s, e, Strand.FORWARD)])
+                    for s, e in spans] for c, spans in gene_spans.items()}
+    no_indels = {c: [SimpleNamespace(insertions=[], deletions=[]) for _ in spans] for c, spans in gene_spans.items()}
+    return _builder(lengths, edges, mode=mode, intervals=intervals, max_feature_hops=hops, features=features,
+                    genes=no_indels, **builder_args)
+
+
+def test_hop_0_flanks_come_nearest_first():
+    builder = _genes_builder({"ctgA": 5000}, [], {"ctgA": [(100, 200), (300, 400), (1500, 1600), (1700, 1800)]}, 2)
+    alignments = {"ctgA": _batch([("IS1", 200, 0, 200, "ctgA", 5000, 1000, 1200, 200, 200)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert _flank_genes(locus.upstream_flanks) == [("gene_ctgA_300", 600), ("gene_ctgA_100", 800)]
+    assert _flank_genes(locus.downstream_flanks) == [("gene_ctgA_1500", 300), ("gene_ctgA_1700", 500)]
+
+
+def test_a_hubs_flanks_come_hop_0_first_then_in_walk_order():
+    locus = _hub_locus('collapse')
+
+    assert [(f.feature.id, f.topological_dist) for f in locus.downstream_flanks] == [
+        ("gene_b1", 0), ("gene_b2", 1), ("gene_b3", 1)]
+
+
+def test_quirk_a_claimed_gene_still_takes_a_slot_of_the_flank_budget():
+    # ctgB's start links to both ends of ctgA, so both sides' walks enter ctgB on '+'. Upstream, walked first, claims
+    # gene_ctgB_100; downstream cuts ctgB's genes to its budget of 1 before skipping the claimed one, so never reaches
+    # gene_ctgB_300
+    builder = _genes_builder({"ctgA": 1000, "ctgB": 1000},
+                             [Edge("ctgA", Strand.FORWARD, "ctgB", Strand.FORWARD),
+                              Edge("ctgB", Strand.REVERSE, "ctgA", Strand.FORWARD)],
+                             {"ctgB": [(100, 200), (300, 400)]}, 1)
+    alignments = {"ctgA": _batch([("IS1", 200, 0, 200, "ctgA", 1000, 400, 600, 200, 200)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert _flank_genes(locus.upstream_flanks) == [("gene_ctgB_100", 500)]
+    assert locus.downstream_flanks == []
+
+
+def test_quirk_a_gene_reached_back_across_the_origin_is_claimed_even_when_dropped():
+    # The IS is on '-', so upstream, walked first, reads chrom forwards: it finds both genes at hop 0, then wraps round
+    # and charges gene_1000 to its last budget slot before dropping it, as it lies past the target. Downstream,
+    # wrapping the other way, then skips gene_1000 as claimed
+    builder = _genes_builder({"chrom": 10000}, [Edge("chrom", Strand.FORWARD, "chrom", Strand.FORWARD)],
+                             {"chrom": [(1000, 1500), (3000, 3500)]}, 3, circular={"chrom"},
+                             max_flank_distance=None)
+    alignments = {"chrom": _batch([("IS1", 200, 0, 200, "chrom", 10000, 500, 700, 200, 200)], [Strand.REVERSE])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert _flank_genes(locus.upstream_flanks) == [("gene_chrom_1000", 300), ("gene_chrom_3000", 2300)]
+    assert [(f.feature.id, f.distance_bp, f.topological_dist) for f in locus.downstream_flanks] == [
+        ("gene_chrom_3000", 7000, 1)]
+
+
+def test_quirk_upstream_hop_0_misses_a_gene_when_overlapping_genes_leave_ends_unsorted():
+    # Sorted by start, the gene ends run 300, 1100, 400: the binary search on them for the target start lands
+    # between the first two, so gene_ctgA_350, nearest, is never looked at
+    builder = _genes_builder({"ctgA": 5000}, [], {"ctgA": [(100, 300), (200, 1100), (350, 400)]}, 3)
+    alignments = {"ctgA": _batch([("IS1", 200, 0, 200, "ctgA", 5000, 1000, 1200, 200, 200)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert _flank_genes(locus.upstream_flanks) == [("gene_ctgA_100", 700)]
+    assert _flank_genes(locus.passengers) == [("gene_ctgA_200", 0)]
+
+
+def test_quirk_a_hop_0_gene_is_never_claimed_so_flanks_both_sides_of_a_small_circle():
+    builder = _genes_builder({"chrom": 3000}, [Edge("chrom", Strand.FORWARD, "chrom", Strand.FORWARD)],
+                             {"chrom": [(2000, 2500)]}, 1, circular={"chrom"}, max_flank_distance=None)
+    alignments = {"chrom": _batch([("IS1", 200, 0, 200, "chrom", 3000, 500, 700, 200, 200)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert [(f.feature.id, f.distance_bp, f.topological_dist) for f in locus.downstream_flanks] == [
+        ("gene_chrom_2000", 1300, 0)]
+    assert [(f.feature.id, f.distance_bp, f.topological_dist) for f in locus.upstream_flanks] == [
+        ("gene_chrom_2000", 1000, 1)]
+
+
+def test_quirk_a_link_past_the_max_flank_distance_is_not_marked_visited():
+    # ctgX is reached first through the long ctgP, past the limit, then through the short ctgQ, within it
+    builder = _genes_builder({"ctgA": 1000, "ctgP": 5000, "ctgQ": 100, "ctgX": 1000},
+                             [Edge("ctgA", Strand.FORWARD, "ctgP", Strand.FORWARD),
+                              Edge("ctgA", Strand.FORWARD, "ctgQ", Strand.FORWARD),
+                              Edge("ctgP", Strand.FORWARD, "ctgX", Strand.FORWARD),
+                              Edge("ctgQ", Strand.FORWARD, "ctgX", Strand.FORWARD)],
+                             {"ctgX": [(100, 400)]}, 1, max_flank_distance=1000)
+    alignments = {"ctgA": _batch([("IS1", 200, 0, 200, "ctgA", 1000, 800, 1000, 200, 200)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert [(f.feature.id, f.distance_bp, f.topological_dist) for f in locus.downstream_flanks] == [
+        ("gene_ctgX_100", 200, 2)]
+
+
+def test_quirk_a_hop_0_gap_is_measured_from_the_alignment_not_where_the_target_ends():
+    # The target runs 200 bp past its alignment's end at 995, onto ctgB, yet the gene at 997 is 2 bp away
+    builder = _genes_builder({"ctgA": 1000, "ctgB": 1000},
+                             [Edge("ctgA", Strand.FORWARD, "ctgB", Strand.FORWARD, overlap=100)],
+                             {"ctgA": [(997, 1000)], "ctgB": [(500, 800)]}, 1)
+    alignments = {"ctgA": _batch([("IS1", 500, 0, 300, "ctgA", 1000, 695, 995, 300, 300)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert _relation_summary(locus.downstream_flanks) == [("gene_ctgA_997", "DOWNSTREAM", 2, "NONE")]
+
+
+def test_variant_mode_siblings_draw_down_one_budget_and_children_inherit_what_remains():
+    # ctgP, visited first, takes one slot, so ctgQ gets only the other of its two genes; ctgR, past ctgP, still gets
+    # the slot ctgP left when it was visited, as each contig queued carries the budget left at the time
+    builder = _genes_builder({"ctgA": 1000, "ctgP": 1000, "ctgQ": 1000, "ctgR": 1000},
+                             [Edge("ctgA", Strand.FORWARD, "ctgP", Strand.FORWARD),
+                              Edge("ctgA", Strand.FORWARD, "ctgQ", Strand.FORWARD),
+                              Edge("ctgP", Strand.FORWARD, "ctgR", Strand.FORWARD)],
+                             {"ctgP": [(100, 200)], "ctgQ": [(100, 200), (300, 400)], "ctgR": [(100, 200)]}, 2)
+    alignments = {"ctgA": _batch([("IS1", 200, 0, 200, "ctgA", 1000, 800, 1000, 200, 200)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert [(f.feature.id, f.topological_dist) for f in locus.downstream_flanks] == [
+        ("gene_ctgP_100", 1), ("gene_ctgQ_100", 1), ("gene_ctgR_100", 2)]
+
+
+def test_collapse_mode_resets_the_budget_for_every_link():
+    builder = _genes_builder({"ctgA": 1000, "ctgP": 1000, "ctgQ": 1000, "ctgR": 1000},
+                             [Edge("ctgA", Strand.FORWARD, "ctgP", Strand.FORWARD),
+                              Edge("ctgA", Strand.FORWARD, "ctgQ", Strand.FORWARD),
+                              Edge("ctgP", Strand.FORWARD, "ctgR", Strand.FORWARD)],
+                             {"ctgP": [(100, 200)], "ctgQ": [(100, 200), (300, 400)], "ctgR": [(100, 200)]}, 2,
+                             mode='collapse')
+    alignments = {"ctgA": _batch([("IS1", 200, 0, 200, "ctgA", 1000, 800, 1000, 200, 200)])}
+
+    [locus] = builder.assemble(alignments)
+
+    assert [(f.feature.id, f.topological_dist) for f in locus.downstream_flanks] == [
+        ("gene_ctgP_100", 1), ("gene_ctgQ_100", 1), ("gene_ctgQ_300", 1), ("gene_ctgR_100", 2)]
+
+
+def test_a_stitched_paths_walk_may_reenter_the_path_when_its_hub_has_no_branches():
+    # Nothing else leaves the hub, so no contig is blocked: the walk off b1 loops back to a1's start
+    lengths = {"a1": 5000, "hub": 1000, "b1": 1000}
+    edges = [Edge("a1", Strand.FORWARD, "hub", Strand.FORWARD), Edge("hub", Strand.FORWARD, "b1", Strand.FORWARD),
+             Edge("b1", Strand.FORWARD, "a1", Strand.FORWARD)]
+    builder = _genes_builder(lengths, edges, {"a1": [(4000, 4500)]}, 1, mode='collapse',
+                             depths={"hub": 30.0, "a1": 10.0, "b1": 10.0}, max_flank_distance=None)
+    alignments = {
+        "a1": _batch([("IS1", 1600, 0, 300, "a1", 5000, 4700, 5000, 300, 300)]),
+        "b1": _batch([("IS1", 1600, 1300, 1600, "b1", 1000, 0, 300, 300, 300)]),
+    }
+
+    [locus] = builder.assemble(alignments, min_coverage=0.30, min_identity=0.0)
+
+    assert [s.contig for s in locus.targets[0].segments] == ["a1", "hub", "b1"]
+    assert [(f.feature.id, f.distance_bp, f.topological_dist) for f in locus.downstream_flanks] == [
+        ("gene_a1_4000", 4700, 1)]
