@@ -1,5 +1,5 @@
 """
-Repeat hubs: the contigs one collapsed repeat covers end to end (docs/adr/0002, 0003).
+Repeat hubs: the contigs one collapsed repeat covers end to end (docs/adr/0003, 0008).
 
 Flank branches and copy number both start from a locus's repeat hub. They share how a hub is found, how hubs that share
 a contig are merged, and which links leave it; each keeps its own walk out of it.
@@ -45,8 +45,8 @@ class RepeatHub:
 
 class Hubs:
     """
-    Finds the repeat hubs of an assembly's stitched paths and loci, merges those that share a contig, and gives the links
-    that leave them.
+    Finds the repeat hubs of an assembly's stitched paths and loci, merges those that share a contig, and gives the
+    links that leave them.
     """
     __slots__ = ('graph', 'contig_lengths', '_overlap')
 
@@ -58,14 +58,16 @@ class Hubs:
 
     @classmethod
     def from_genome(cls, genome: 'GenomeAssembly') -> 'Hubs':
+        """The hubs of an assembly, from its links and contig lengths."""
         return cls(list(genome.edges), genome.contig_lengths)
 
     def _covers(self, length: int, start: int, end: int) -> bool:
-        """True if an alignment from `start` to `end` covers a contig of `length` end to end, so the contig is a hub's."""
+        """True if an alignment from `start` to `end` covers a contig of `length` end to end, so it is in a hub."""
         return length - (end - start) <= self._overlap + END_SLOP
 
     @staticmethod
     def _hub(covered: Iterable[tuple[str, Strand]]) -> RepeatHub:
+        """A hub of the contigs in `covered`, in order, each on the first strand it comes with."""
         contigs: dict[str, Strand] = {}
         for contig, strand in covered:
             contigs.setdefault(contig, strand)
@@ -95,19 +97,16 @@ class Hubs:
         merged: list[tuple[RepeatHub, list[int]]] = []
         for i, hub in enumerate(hubs):
             names = hub.names
-            contigs: dict[str, Strand] = {}
+            covered: list[tuple[str, Strand]] = []
             members: list[int] = []
             kept = []
             for other, other_members in merged:
                 if other.names & names:
-                    for contig, strand in other.contigs:
-                        contigs.setdefault(contig, strand)
+                    covered += other.contigs
                     members = other_members + members
                 else:
                     kept.append((other, other_members))
-            for contig, strand in hub.contigs:
-                contigs.setdefault(contig, strand)
-            merged = kept + [(RepeatHub(tuple(contigs.items())), members + [i])]
+            merged = kept + [(Hubs._hub(covered + list(hub.contigs)), members + [i])]
         return merged
 
     def _links_out(self, contig: str, strand: Strand, side: int, hub: RepeatHub) -> list[Edge]:
@@ -115,20 +114,20 @@ class Hubs:
 
     def leaving(self, hub: RepeatHub, side: int) -> list[Edge]:
         """
-        The links that leave a repeat hub on one side, out of every hub contig: `side` 1 for the side the hub's contigs
-        are read out of on their strands, -1 for the side they are read into. A link leaves from the end on that side of
-        a hub contig, so following edge orientation from it never turns back towards the hub, and goes to a contig
-        outside the hub. Copy number walks out by these: each copy collapsed into the hub reaches an anchor by one of
-        them, wherever in the hub it leaves. Flank branches use `leaving_outermost` instead.
+        The links that leave a repeat hub on one side, out of every contig in it: `side` 1 for the side the hub's
+        contigs are read out of on their strands, -1 for the side they are read into. A link leaves from the end on
+        that side of one of its contigs, so following edge orientation from it never turns back towards the hub, and
+        goes to a contig outside the hub. Copy number walks out by these: each copy collapsed into the hub reaches an
+        anchor by one of them, wherever in the hub it leaves. Flank branches use `leaving_outermost` instead.
         """
         return [e for contig, strand in hub.contigs for e in self._links_out(contig, strand, side, hub)]
 
     def leaving_outermost(self, hub: RepeatHub, side: int) -> list[Edge]:
         """
-        The links that leave a repeat hub on one side (see `leaving`), out of its outermost contig on that side only: the
-        first for `side` -1, the last for 1. Flank branches leave by these, where copy number uses every hub contig's
-        links: a link out of the middle of the hub enters one copy's stub of a target variant, so its genes would be
-        false flanks (#56).
+        The links that leave a repeat hub on one side (see `leaving`), out of its outermost contig on that side only:
+        the first for `side` -1, the last for 1. Flank branches leave by these, where copy number uses the links out of
+        every contig in the hub: a link out of the middle of the hub enters one copy's stub of a target variant, so
+        its genes would be false flanks (#56).
         """
         if not hub:
             return []

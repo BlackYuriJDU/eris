@@ -104,7 +104,8 @@ def _walk_out(hubs: Hubs, hub: RepeatHub, repeats: set[str]) -> dict[str, list[W
     side of a contig (an undirected walk out of the IS26 hub reaches the rRNA repeat). A walk ends at the first contig
     of at least MIN_ANCHOR_LENGTH (an anchor), at another hub's contig, or when the stubs it crossed exceed
     STUB_BUDGET. Each distinct oriented end is one link, so an anchor between two inverted copies counts twice. A walk
-    starts on the links out of every hub contig (see `Hubs.leaving`), since a copy can leave the hub from any of them.
+    starts on the links out of every contig in the hub (see `Hubs.leaving`), since a copy can leave the hub from any
+    of them.
     """
     graph, lengths = hubs.graph, hubs.contig_lengths
     ends = {}

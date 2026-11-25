@@ -322,7 +322,7 @@ class LocusBuilder:
         """
         Keeps one stitched path per repeat hub (#14). Near-identical targets (IS1A, IS1R, ...) each stitch their own
         path through the contigs one collapsed repeat covers end to end, mostly as synthetic records, and would each
-        report the whole hub. Paths that share a hub contig, directly or through another path, are one locus; the
+        report the whole hub. Paths whose hubs share a contig, directly or through another path, are one locus; the
         one that aligns the most target bases names it.
         """
         groups = self.hubs.group([self.hubs.of_path(path) for path in paths])
@@ -345,7 +345,7 @@ class LocusBuilder:
         hub = self.hubs.of_path(fragments)
         if not hub:
             return [], []
-        # fragments are in the target's direction, so the first hub contig is upstream
+        # fragments are in the target's direction, so the hub's first contig is upstream
         (first, _), (last, _) = hub.contigs[0], hub.contigs[-1]
         links_by_side: list[list[Edge]] = []
         for side, end, outer in ((-1, fragments[0], first), (1, fragments[-1], last)):
