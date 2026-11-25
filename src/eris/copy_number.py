@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Callable, NamedTuple, Optional, TYPE_CHECKING
 
-from eris.graph import Edge, Graph, links_leaving
+from eris.hub import Hubs, RepeatHub
 from eris.interval import Strand
 
 if TYPE_CHECKING:
@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 MIN_ANCHOR_LENGTH = 1000  # bp; a shorter contig next to a hub is a stub that the walk crosses
 STUB_BUDGET = 500  # bp of stubs a walk may cross before it gives up (ISEc12's flanks break into 200-400 bp stubs)
 TIER_TOLERANCE = 1.5  # largest depth ratio between neighbouring anchors in one depth tier
-END_SLOP = 10  # bp a target alignment may stop short of a contig's ends, beyond the link overlap, and still cover it
 
 
 # Classes --------------------------------------------------------------------------------------------------------------
@@ -60,26 +59,26 @@ class WalkEnd(NamedTuple):
 
 
 # Functions ------------------------------------------------------------------------------------------------------------
-def assign_copy_numbers(loci: list['Locus'], genome: 'GenomeAssembly') -> None:
+def assign_copy_numbers(loci: list['Locus'], genome: 'GenomeAssembly', hubs: Optional[Hubs] = None) -> None:
     """
     Sets each locus's copy number, and its `fractional_depth`, which the report prints as copy_number. Without read
     depth a repeat hub gets only its anchor link count; its estimate and `fractional_depth` are None. A locus in
-    unique sequence is one copy either way.
+    unique sequence is one copy either way. Loci whose hubs share a contig share one copy number (#14). `hubs` is
+    built from `genome` if not given.
     """
-    overlap = max((e.overlap for e in genome.edges), default=0)
-    hubs = _merge_hubs([_hub(locus, genome.contig_lengths, overlap) for locus in loci])
-    repeats = {contig for hub, _ in hubs for contig in hub}
-    graph = Graph(genome.edges + [e.complement() for e in genome.edges])
-    for hub, members in hubs:
+    hubs = hubs or Hubs.from_genome(genome)
+    groups = hubs.group([hubs.of_locus(locus) for locus in loci])
+    repeats = {contig for hub, _ in groups for contig in hub}
+    for hub, members in groups:
         copies = UNIQUE
         if hub:
-            ends = _walk_out(graph, hub, genome.contig_lengths, repeats - hub.keys())
+            ends = _walk_out(hubs, hub, repeats - hub.names)
             if genome.has_depth:
                 hub_depth = max(genome.contig_depths[c] for c in hub)
-                copies = _estimate(hub_depth, ends, genome.contig_depths, frozenset(hub),
+                copies = _estimate(hub_depth, ends, genome.contig_depths, hub.names,
                                    lambda: _baseline_depth(genome, repeats))
             else:
-                copies = CopyNumber(None, _anchor_links(ends), hub=frozenset(hub))
+                copies = CopyNumber(None, _anchor_links(ends), hub=hub.names)
         for i in members:
             loci[i].copy_number = copies
             loci[i].fractional_depth = None if copies.estimate is None else float(copies.estimate)
@@ -99,55 +98,19 @@ def depth_tiers(depths: list[float], tolerance: float = TIER_TOLERANCE) -> list[
     return tiers
 
 
-def covers_contig(length: int, start: int, end: int, overlap: int) -> bool:
-    """True if an alignment from `start` to `end` covers a contig of `length` end to end, so the contig is a hub's."""
-    return length - (end - start) <= overlap + END_SLOP
-
-
-def _hub(locus: 'Locus', lengths: dict[str, int], overlap: int) -> dict[str, Strand]:
-    """
-    The contigs a locus's targets cover end to end, each with the strand it is first read on. Together they are the
-    locus's repeat hub; a contig with sequence beyond the target is unique sequence, not part of it.
-    """
-    hub: dict[str, Strand] = {}
-    for target in locus.targets:
-        for seg in target.segments:
-            if covers_contig(lengths[seg.contig], seg.start, seg.end, overlap):
-                hub.setdefault(seg.contig, seg.strand)
-    return hub
-
-
-def _merge_hubs(hubs: list[dict[str, Strand]]) -> list[tuple[dict[str, Strand], list[int]]]:
-    """
-    Merges the hubs of loci that share a contig, so near-identical targets walking through one hub (#14) are counted
-    once. Returns each merged hub with the indices of its loci; a locus with no hub stands alone.
-    """
-    merged: list[tuple[dict[str, Strand], list[int]]] = []
-    for i, hub in enumerate(hubs):
-        sharing = [m for m in merged if hub.keys() & m[0].keys()]
-        combined: dict[str, Strand] = {}
-        members = []
-        for other, other_members in sharing:
-            combined.update({c: s for c, s in other.items() if c not in combined})
-            members += other_members
-            merged.remove((other, other_members))
-        combined.update({c: s for c, s in hub.items() if c not in combined})
-        merged.append((combined, sorted(members + [i])))
-    return merged
-
-
-def _walk_out(graph: Graph, hub: dict[str, Strand], lengths: dict[str, int],
-              repeats: set[str]) -> dict[str, list[WalkEnd]]:
+def _walk_out(hubs: Hubs, hub: RepeatHub, repeats: set[str]) -> dict[str, list[WalkEnd]]:
     """
     Walks out of a repeat hub on each side, following edge orientation so a walk never turns back towards the hub's
     side of a contig (an undirected walk out of the IS26 hub reaches the rRNA repeat). A walk ends at the first contig
     of at least MIN_ANCHOR_LENGTH (an anchor), at another hub's contig, or when the stubs it crossed exceed
-    STUB_BUDGET. Each distinct oriented end is one link, so an anchor between two inverted copies counts twice.
+    STUB_BUDGET. Each distinct oriented end is one link, so an anchor between two inverted copies counts twice. A walk
+    starts on the links out of every hub contig (see `Hubs.leaving`), since a copy can leave the hub from any of them.
     """
+    graph, lengths = hubs.graph, hubs.contig_lengths
     ends = {}
     for side, sign in (("upstream", -1), ("downstream", 1)):
         found: dict[tuple[str, Strand], WalkEnd] = {}
-        stack = [(edge, 0) for edge in links_leaving(graph, hub, sign)]
+        stack = [(edge, 0) for edge in hubs.leaving(hub, sign)]
         seen = set()
         while stack:
             edge, used = stack.pop()

@@ -46,7 +46,7 @@ class Branch(NamedTuple):
     carried: int = 0
 
 
-class RepeatHub(NamedTuple):
+class HubBranches(NamedTuple):
     """
     The other links leaving a collapse-mode stitched locus's repeat hub, besides those the search from the locus's own
     ends already follows.
@@ -149,12 +149,12 @@ class FlankSearch:
         self.rule = rule
 
     def search(self, first: TargetSpan, last: Optional[TargetSpan] = None, *,
-               hub: Optional[RepeatHub] = None) -> Flanks:
+               hub: Optional[HubBranches] = None) -> Flanks:
         """
         The flanks of one locus: upstream of `first` and downstream of `last` (by default `first`), plus along the
         branches of its repeat hub, if any.
         """
-        hub = hub or RepeatHub()
+        hub = hub or HubBranches()
         claimed: set[tuple[str, int]] = set()  # genes the graph walks report; shared by both sides, never by loci
         upstream = self._side_flanks(self._upstream(first), hub.upstream, hub.blocked, claimed)
         downstream = self._side_flanks(self._downstream(last or first), hub.downstream, hub.blocked, claimed)

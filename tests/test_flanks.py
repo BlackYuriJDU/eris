@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from eris.constants import Context, Strand
-from eris.flanks import Branch, BudgetRule, FlankSearch, RepeatHub, TargetSpan
+from eris.flanks import Branch, BudgetRule, FlankSearch, HubBranches, TargetSpan
 from eris.graph import Edge, TopologyEngine, circular_contigs
 from eris.interval import IntervalBatch
 
@@ -395,7 +395,7 @@ _FIRST, _LAST = TargetSpan("a1", 4700, 5000, F), TargetSpan("b1", 0, 300, F)
 
 
 def _hub(carried=0, blocked=frozenset()):
-    return RepeatHub(upstream=(Branch(Edge("hub", R, "a2", R)),),
+    return HubBranches(upstream=(Branch(Edge("hub", R, "a2", R)),),
                      downstream=(Branch(Edge("hub", F, "b2", F, overlap=100), carried),
                                  Branch(Edge("hub", F, "b3", R))),
                      blocked=blocked)
