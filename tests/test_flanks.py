@@ -21,7 +21,7 @@ def _search(lengths, edges, genes, budget=1, rule=SHARED, max_distance=None):
 
 def _found(candidates):
     """(contig, gene index, gap, hops) of each candidate, in order."""
-    return [(c.contig, c.index, c.gap, c.hops) for c in candidates]
+    return [(c.contig, c.gene_index, c.gap, c.hops) for c in candidates]
 
 
 def _contexts(candidates):
@@ -244,15 +244,15 @@ def test_per_branch_gives_each_copy_of_a_collapsed_repeat_its_own_flank_budget()
     flanks = _collapsed_repeat(PER_BRANCH)
 
     # Downstream reads each copy's first gene; upstream walks the links backwards, so reads each copy's last gene
-    assert [(c.contig, c.index) for c in flanks.downstream] == [("d0", 0), ("d1", 0), ("d2", 0)]
-    assert [(c.contig, c.index) for c in flanks.upstream] == [("u0", 2), ("u1", 2), ("u2", 2)]
+    assert [(c.contig, c.gene_index) for c in flanks.downstream] == [("d0", 0), ("d1", 0), ("d2", 0)]
+    assert [(c.contig, c.gene_index) for c in flanks.upstream] == [("u0", 2), ("u1", 2), ("u2", 2)]
 
 
 def test_shared_spends_one_flank_budget_across_branches():
     flanks = _collapsed_repeat(SHARED)
 
-    assert [(c.contig, c.index) for c in flanks.downstream] == [("d0", 0)]
-    assert [(c.contig, c.index) for c in flanks.upstream] == [("u0", 2)]
+    assert [(c.contig, c.gene_index) for c in flanks.downstream] == [("d0", 0)]
+    assert [(c.contig, c.gene_index) for c in flanks.upstream] == [("u0", 2)]
 
 
 def _siblings_and_a_child(rule):
@@ -261,7 +261,7 @@ def _siblings_and_a_child(rule):
                      [Edge("ctgA", F, "ctgP", F), Edge("ctgA", F, "ctgQ", F), Edge("ctgP", F, "ctgR", F)],
                      {"ctgP": [(100, 200)], "ctgQ": [(100, 200), (300, 400)], "ctgR": [(100, 200)]},
                      budget=2, rule=rule)
-    return [(c.contig, c.index, c.hops) for c in search.search(TargetSpan("ctgA", 800, 1000, F)).downstream]
+    return [(c.contig, c.gene_index, c.hops) for c in search.search(TargetSpan("ctgA", 800, 1000, F)).downstream]
 
 
 def test_shared_siblings_draw_down_one_budget_and_children_inherit_what_their_parent_left():
@@ -292,7 +292,7 @@ def test_a_gene_two_branches_of_one_locus_reach_is_reported_once(rule):
 
     flanks = search.search(TargetSpan("ctgA", 800, 1000, F))
 
-    assert [(c.contig, c.index) for c in flanks.downstream] == [("ctgB", 0)]
+    assert [(c.contig, c.gene_index) for c in flanks.downstream] == [("ctgB", 0)]
 
 
 def test_two_loci_whose_walks_reach_the_same_gene_both_report_it():

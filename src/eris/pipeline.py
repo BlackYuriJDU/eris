@@ -448,7 +448,7 @@ class LocusBuilder:
 
     def _flank(self, candidate: FlankCandidate, span: TargetSpan) -> FeatureRelation:
         """The relation of a flank the flank search found on one side of `span` to its target."""
-        return self._resolve_relation(candidate.contig, candidate.index, candidate.strand, candidate.context,
+        return self._resolve_relation(candidate.contig, candidate.gene_index, candidate.strand, candidate.context,
                                       candidate.gap, candidate.hops, span.strand, (span.start, span.end))
 
     def _resolve_relation(self, contig: str, orig_idx: int, gene_strand: Strand, spatial: Context, dist: int,

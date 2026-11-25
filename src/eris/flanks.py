@@ -68,7 +68,7 @@ class FlankCandidate(NamedTuple):
 
     Attributes:
         contig: The gene's contig.
-        index: The gene's original index on it.
+        gene_index: The gene's original index on its contig.
         context: UPSTREAM or DOWNSTREAM, or OVERLAPPING_START or OVERLAPPING_END for a gene that runs back over the
             target's end (#64); on the target's own contig (hop 0), whatever Interval.relate gives.
         gap: Flank distance in bp, never negative.
@@ -76,7 +76,7 @@ class FlankCandidate(NamedTuple):
         strand: The gene's strand as the search reads it: flipped for a contig entered on its reverse strand.
     """
     contig: str
-    index: int  # type: ignore[assignment]  # shadows tuple.index, which nothing here calls
+    gene_index: int
     context: Context
     gap: int
     hops: int
@@ -108,6 +108,16 @@ class _Side(NamedTuple):
     context: Context
     target: Interval
     beyond: int
+
+
+class _Step(NamedTuple):
+    """One contig queued in a side's graph walk."""
+    contig: str
+    exit_strand: Strand  # the strand it is read on, so it is left by its end, or on '-', its start
+    budget: int  # flanks still to find past it
+    hops: int  # links crossed on reaching its next contig
+    start: int  # where it starts along the walk, relative to where the target ends
+    links: Optional[tuple[Edge, ...]] = None  # the links to follow, or None for every link leaving it
 
 
 class FlankSearch:
@@ -146,8 +156,8 @@ class FlankSearch:
         """
         hub = hub or RepeatHub()
         claimed: set[tuple[str, int]] = set()  # genes the graph walks report; shared by both sides, never by loci
-        upstream = self._side(self._upstream(first), hub.upstream, hub.blocked, claimed)
-        downstream = self._side(self._downstream(last or first), hub.downstream, hub.blocked, claimed)
+        upstream = self._side_flanks(self._upstream(first), hub.upstream, hub.blocked, claimed)
+        downstream = self._side_flanks(self._downstream(last or first), hub.downstream, hub.blocked, claimed)
         return Flanks(upstream, downstream)
 
     @staticmethod
@@ -162,8 +172,8 @@ class FlankSearch:
         return _Side(span.contig, span.end if forward else span.start, 1 if forward else -1, Context.DOWNSTREAM,
                      Interval(span.start, span.end, span.strand), span.beyond_downstream)
 
-    def _side(self, side: _Side, branches: tuple[Branch, ...], blocked: frozenset[str],
-              claimed: set[tuple[str, int]]) -> list[FlankCandidate]:
+    def _side_flanks(self, side: _Side, branches: tuple[Branch, ...], blocked: frozenset[str],
+                     claimed: set[tuple[str, int]]) -> list[FlankCandidate]:
         """
         One side's flanks. The graph walk places every contig by where it starts along the walk, relative to where the
         target ends: past the side's boundary by `side.beyond`, or for a branch, past the hub's edge by its `carried`.
@@ -171,45 +181,45 @@ class FlankSearch:
         """
         limit = self.max_distance
         found = self._own_contig(side)
-        rem = self.budget - len(found)
+        left = self.budget - len(found)
 
         length = self.graph.contig_lengths[side.contig]
         walk_boundary = side.boundary if side.direction == 1 else length - side.boundary
         exit_strand = Strand.FORWARD if side.direction == 1 else Strand.REVERSE
-        # (contig, exit strand, budget, hops, where the contig starts, the links to follow or None for all)
-        queue: list[tuple[str, Strand, int, int, int, Optional[tuple[Edge, ...]]]] = [
-            (side.contig, exit_strand, rem, 1, -(walk_boundary + side.beyond), None)]
-        queue += [(b.link.u, b.link.u_strand, self.budget, 1, -self.graph.contig_lengths[b.link.u] - b.carried,
-                   (b.link,)) for b in branches]
-        visited = {(contig, strand) for contig, strand, *_ in queue}
+        queue = [_Step(side.contig, exit_strand, left, 1, -(walk_boundary + side.beyond))]
+        queue += [_Step(b.link.u, b.link.u_strand, self.budget, 1, -self.graph.contig_lengths[b.link.u] - b.carried,
+                        (b.link,)) for b in branches]
+        visited = {(step.contig, step.exit_strand) for step in queue}
         wrapped = False  # whether this side's walk has gone round a circular contig's origin, from any start
 
         while queue:
-            contig, exit_strand, parent_budget, hops, start, links = queue.pop(0)
-            if parent_budget <= 0:
+            step = queue.pop(0)
+            if step.budget <= 0:
                 continue
-            rem = parent_budget
-            for link in self.graph.links_from(contig, exit_strand) if links is None else links:
-                if link.u_strand != exit_strand or link.v in blocked:
+            left = step.budget
+            links = self.graph.links_from(step.contig, step.exit_strand) if step.links is None else step.links
+            for link in links:
+                if link.u_strand != step.exit_strand or link.v in blocked:
                     continue
                 if self.rule is BudgetRule.PER_BRANCH:
-                    rem = parent_budget
-                v = link.v
-                v_start = start + self.graph.contig_lengths[contig] - link.overlap
-                if limit is not None and v_start > limit:
-                    continue  # checked before the visited mark, so v may still be entered by a shorter way
+                    left = step.budget
+                entered = link.v
+                entered_start = step.start + self.graph.contig_lengths[step.contig] - link.overlap
+                if limit is not None and entered_start > limit:
+                    continue  # checked before the visited mark, so it may still be entered by a shorter way
                 # The self-link of a circular contig leads back to its start across the origin: go round it once
-                if v in self.graph.circular and is_self_link(link) and not wrapped:
+                if entered in self.graph.circular and is_self_link(link) and not wrapped:
                     wrapped = True
-                elif (v, link.v_strand) in visited:
+                elif (entered, link.v_strand) in visited:
                     continue
-                visited.add((v, link.v_strand))
+                visited.add((entered, link.v_strand))
 
-                reported, charged = self._across_link(side, v, link.v_strand, v_start, hops, rem, claimed)
+                reported, charged = self._across_link(side, entered, link.v_strand, entered_start, step.hops, left,
+                                                      claimed)
                 found += reported
-                rem -= charged
-                if rem > 0:
-                    queue.append((v, link.v_strand, rem, hops + 1, v_start, None))
+                left -= charged
+                if left > 0:
+                    queue.append(_Step(entered, link.v_strand, left, step.hops + 1, entered_start))
         return found
 
     def _own_contig(self, side: _Side) -> list[FlankCandidate]:
