@@ -15,11 +15,12 @@ from pyfgs import GeneFinder, Model, Gene, Mutation
 
 from eris.io import TargetDatabase, GenomeAssembly, gene_id
 from eris.graph import TopologyEngine, Edge
-from eris.flanks import FlankSearch, FlankCandidate, Flanks, TargetSpan, Branch, RepeatHub, BudgetRule
+from eris.flanks import FlankSearch, FlankCandidate, Flanks, TargetSpan, Branch, HubBranches, BudgetRule
+from eris.hub import Hubs
 from eris.alignment import AlignmentBatch, AlignmentRecord, pooled_identity
 from eris.interval import IntervalBatch, Context, Strand, Interval
 from eris.constants import FeatureType, Orientation, Effect, DEFAULT_MAX_FLANK_DISTANCE
-from eris.copy_number import CopyNumber, assign_copy_numbers, covers_contig
+from eris.copy_number import CopyNumber, assign_copy_numbers
 from eris.target_end import beyond_contig_end, carried_past_link
 
 
@@ -234,7 +235,7 @@ class LocusBuilder:
     identifies flanking and passenger genes for each identified locus.
     """
     __slots__ = ('topology_engine', 'genome', 'target_feature_type', 'locus_tolerance', 'features', 'genes',
-                 'gene_intervals', 'alignments', 'flank_search')
+                 'gene_intervals', 'alignments', 'flank_search', 'hubs')
 
     def __init__(self, topology_engine: 'TopologyEngine', genome: 'GenomeAssembly',
                  target_feature_type: FeatureType = FeatureType.CDS,
@@ -242,7 +243,8 @@ class LocusBuilder:
                  features: dict[str, list[GenomicFeature]] = None,
                  genes: dict[str, list[Gene]] = None,
                  max_flank_distance: Optional[int] = DEFAULT_MAX_FLANK_DISTANCE,
-                 gene_intervals: Optional[dict[str, IntervalBatch]] = None):
+                 gene_intervals: Optional[dict[str, IntervalBatch]] = None,
+                 hubs: Optional[Hubs] = None):
         """
         Initialize the LocusBuilder.
 
@@ -258,6 +260,7 @@ class LocusBuilder:
                 graph; None for no limit.
             gene_intervals: Each contig's genes as intervals sorted by start, indexing `features` and `genes` by
                 their original indices.
+            hubs: The assembly's repeat hubs, built from `genome` if not given.
         """
         self.topology_engine = topology_engine
         self.genome = genome
@@ -267,6 +270,7 @@ class LocusBuilder:
         self.genes = genes or {}
         self.gene_intervals = gene_intervals or {}
         self.alignments: dict[str, AlignmentBatch] = {}
+        self.hubs = hubs or Hubs.from_genome(genome)
         rule = BudgetRule.PER_BRANCH if self._collapse else BudgetRule.SHARED
         self.flank_search = FlankSearch(topology_engine, self.gene_intervals, flank_budget, max_flank_distance,
                                         rule)
@@ -318,56 +322,42 @@ class LocusBuilder:
         """
         Keeps one stitched path per repeat hub (#14). Near-identical targets (IS1A, IS1R, ...) each stitch their own
         path through the contigs one collapsed repeat covers end to end, mostly as synthetic records, and would each
-        report the whole hub. Paths that share a hub contig, directly or through another path, are one locus; the
+        report the whole hub. Paths whose hubs share a contig, directly or through another path, are one locus; the
         one that aligns the most target bases names it.
         """
-        overlap = max((e.overlap for e in self.genome.edges), default=0)
-        groups: list[tuple[set[str], list[list['AlignmentRecord']]]] = []
-        for path in paths:
-            hub = {f.t_name for f in path if covers_contig(f.t_length, f.t_start, f.t_end, overlap)}
-            members = [path]
-            for group in [g for g in groups if g[0] & hub]:
-                other_hub, other_members = group
-                hub |= other_hub
-                members = other_members + members
-                groups.remove(group)
-            groups.append((hub, members))
+        groups = self.hubs.group([self.hubs.of_path(path) for path in paths])
 
         def aligned_bases(path: list['AlignmentRecord']) -> tuple[int, float]:
             """Target bases the path's real fragments align, then pooled identity to break ties."""
             return sum(f.q_end - f.q_start for f in path if f.idx != -1), pooled_identity(path)
-        return [max(members, key=aligned_bases) for _, members in groups]
+        return [max((paths[i] for i in members), key=aligned_bases) for _, members in groups]
 
     def _hub_branch_links(self, fragments: list['AlignmentRecord']) -> tuple[list[Edge], list[Edge]]:
         """
         In collapse mode, the links leaving a stitched path's repeat hub upstream and downstream, other than those the
         flank walk from the path's own end contig already follows (#56). A hub reported once stands for every copy
         collapsed into it, so each of its links is a branch with its own flanks. Only the links leaving the hub's
-        outermost contig on each side count: a link out of the middle of the hub enters a stub of one copy's variant
-        of the target, which brings more partial gene calls than flanks. Variant mode has none: each path through a
+        outermost contig on each side count (see `Hubs.leaving_outermost`). Variant mode has none: each path through a
         hub is its own locus.
         """
         if not self._collapse:
             return [], []
-        overlap = max((e.overlap for e in self.genome.edges), default=0)
-        hub: dict[str, Strand] = {}
-        for f in fragments:
-            if covers_contig(f.t_length, f.t_start, f.t_end, overlap):
-                hub.setdefault(f.t_name, Strand(f.strand))
+        hub = self.hubs.of_path(fragments)
         if not hub:
             return [], []
-        in_order = list(hub)  # fragments are in the target's direction, so the first hub contig is upstream
+        # fragments are in the target's direction, so the hub's first contig is upstream
+        (first, _), (last, _) = hub.contigs[0], hub.contigs[-1]
         links_by_side: list[list[Edge]] = []
-        for side, end, outer in ((-1, fragments[0], in_order[0]), (1, fragments[-1], in_order[-1])):
+        for side, end, outer in ((-1, fragments[0], first), (1, fragments[-1], last)):
             if end.t_name == outer:  # the walk starts on the hub's edge, so it already leaves by every link
                 links_by_side.append([])
                 continue
             # The walk from the end contig is the branch along the link into it
-            links_by_side.append([e for e in self.topology_engine.links_leaving(hub, side)
-                                  if e.u == outer and (e.v, e.v_strand) != (end.t_name, end.strand * side)])
+            links_by_side.append([e for e in self.hubs.leaving_outermost(hub, side)
+                                  if (e.v, e.v_strand) != (end.t_name, end.strand * side)])
         return links_by_side[0], links_by_side[1]
 
-    def _repeat_hub(self, fragments: list['AlignmentRecord']) -> Optional[RepeatHub]:
+    def _hub_branches(self, fragments: list['AlignmentRecord']) -> Optional[HubBranches]:
         """
         The branches of a stitched path's repeat hub (see `_hub_branch_links`), each with the target its copy carries
         onto the branch (see `carried_past_link`); None if it has none. Once a hub's branches are walked, none may loop
@@ -377,9 +367,9 @@ class LocusBuilder:
         if not (u_links or d_links):
             return None
         lengths = self.genome.contig_lengths
-        return RepeatHub(tuple(Branch(e, carried_past_link(e, self.alignments, lengths)) for e in u_links),
-                         tuple(Branch(e, carried_past_link(e, self.alignments, lengths)) for e in d_links),
-                         frozenset(f.t_name for f in fragments))
+        return HubBranches(tuple(Branch(e, carried_past_link(e, self.alignments, lengths)) for e in u_links),
+                           tuple(Branch(e, carried_past_link(e, self.alignments, lengths)) for e in d_links),
+                           frozenset(f.t_name for f in fragments))
 
     def _add_flanks(self, locus: 'Locus', flanks: 'Flanks', first: TargetSpan,
                     last: Optional[TargetSpan] = None) -> None:
@@ -518,7 +508,7 @@ class LocusBuilder:
         last_span = TargetSpan(last.t_name, last.t_start, last.t_end, Strand(last.strand),
                                beyond_downstream=beyond_contig_end([last], Strand(last.strand), Context.DOWNSTREAM,
                                                                    self.topology_engine))
-        flanks = self.flank_search.search(first_span, last_span, hub=self._repeat_hub(fragments))
+        flanks = self.flank_search.search(first_span, last_span, branches=self._hub_branches(fragments))
         self._add_flanks(locus, flanks, first_span, last_span)
 
         # 3. INSIDE PASSENGERS (Sweep across ALL fragments, including unaligned synthetic bubbles)
@@ -637,6 +627,7 @@ class Pipeline:
             mode=self.mode,
             circular=genome.circular)
 
+        hubs = Hubs.from_genome(genome)
         builder = LocusBuilder(
             topology_engine=topology_engine,
             genome=genome,
@@ -646,12 +637,13 @@ class Pipeline:
             features=gene_features,
             genes=gene_cds,
             max_flank_distance=self.max_flank_distance,
-            gene_intervals=gene_intervals
+            gene_intervals=gene_intervals,
+            hubs=hubs
         )
 
         loci = builder.assemble(alignments, min_coverage=self.min_coverage, min_identity=self.min_identity)
         if self.mode == 'collapse':
             # A walk out of one locus's hub stops at any other locus's hub, so every locus must be built first
             loci = list(loci)
-            assign_copy_numbers(loci, genome)
+            assign_copy_numbers(loci, genome, hubs)
         yield from loci

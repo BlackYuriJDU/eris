@@ -145,16 +145,6 @@ class Graph:
         return self.adj.get(node_id, {}).keys()
 
 
-def links_leaving(graph: Graph, hub: dict[str, Strand], side: int) -> list[Edge]:
-    """
-    The links that leave a repeat hub on one side: `side` 1 for the side the hub's contigs are read out of on the
-    strands in `hub`, -1 for the side they are read into. A link leaves from the end on that side of one of the hub's contigs, so
-    following edge orientation from it never turns back towards the hub, and goes to a contig outside the hub.
-    """
-    return [e for contig, strand in hub.items() for e in graph.get_neighbors(contig)
-            if e.u_strand == strand * side and e.v not in hub]
-
-
 class TopologyEngine:
     """
     Engine for traversing assembly graphs and resolving complex alignments.
@@ -545,10 +535,6 @@ class TopologyEngine:
     def exit_overlap(self, contig: str, strand: Strand) -> int:
         """The largest overlap of any link leaving `contig` read on `strand`, so by its end or, on '-', its start."""
         return self._end_overlap.get((contig, strand, True), 0)
-
-    def links_leaving(self, hub: dict[str, Strand], side: int) -> list[Edge]:
-        """The links that leave a repeat hub on one side (see `links_leaving`)."""
-        return links_leaving(self._graph, hub, side)
 
     def links_from(self, contig: str, strand: Strand) -> list[Edge]:
         """
