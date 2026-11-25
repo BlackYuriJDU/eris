@@ -206,7 +206,7 @@ KNOWN_COUNT_ERRORS = {
 @pytest.fixture(scope="module", params=BENCHMARKS)
 def benchmark(request, target_db):
     genome_file, truth_file = BENCHMARKS[request.param]
-    # flank_budget=0 completely disables the PyFGS gene calling for extreme speed
+    # flank_budget=0 reports no flanks; it does not skip gene calling
     with Pipeline(target_db, flank_budget=0, mode='collapse', min_coverage=0.30) as pipeline:
         loci = list(pipeline(GenomeAssembly.from_file(DATA_DIR / genome_file)))
     return request.param, DATA_DIR / truth_file, loci
@@ -490,9 +490,9 @@ def run_eris_with_genes(genome_file: str, target_db, placer, mode: str = 'collap
     genome, runs_by_mode, genes, place = _ERIS_RUNS[genome_file]
     if mode not in runs_by_mode:
         runs = runs_by_mode[mode] = {}
-        for hops in (RELATION_HOPS, REACH_HOPS):
-            with Pipeline(target_db, flank_budget=hops, mode=mode, min_coverage=0.30) as pipeline:
-                runs[hops] = list(pipeline(genome, genes))
+        for budget in (RELATION_HOPS, REACH_HOPS):
+            with Pipeline(target_db, flank_budget=budget, mode=mode, min_coverage=0.30) as pipeline:
+                runs[budget] = list(pipeline(genome, genes))
     return genome, runs_by_mode[mode], genes, place
 
 
