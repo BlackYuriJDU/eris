@@ -206,8 +206,8 @@ KNOWN_COUNT_ERRORS = {
 @pytest.fixture(scope="module", params=BENCHMARKS)
 def benchmark(request, target_db):
     genome_file, truth_file = BENCHMARKS[request.param]
-    # max_feature_hops=0 completely disables the PyFGS gene calling for extreme speed
-    with Pipeline(target_db, max_feature_hops=0, mode='collapse', min_coverage=0.30) as pipeline:
+    # flank_budget=0 completely disables the PyFGS gene calling for extreme speed
+    with Pipeline(target_db, flank_budget=0, mode='collapse', min_coverage=0.30) as pipeline:
         loci = list(pipeline(GenomeAssembly.from_file(DATA_DIR / genome_file)))
     return request.param, DATA_DIR / truth_file, loci
 
@@ -257,7 +257,7 @@ FRAGMENTED_FASTA = DATA_DIR / "contigs_shovill_simulated.fasta"
 @pytest.mark.skipif(not FRAGMENTED_FASTA.exists(), reason=f"{FRAGMENTED_FASTA} not found")
 def test_fragmented_fasta_warns_and_reports_no_stitched_loci_and_no_double_claims(target_db, isoform_groups):
     genome = GenomeAssembly.from_file(FRAGMENTED_FASTA)
-    with Pipeline(target_db, max_feature_hops=0, mode='collapse', min_coverage=0.30) as pipeline:
+    with Pipeline(target_db, flank_budget=0, mode='collapse', min_coverage=0.30) as pipeline:
         loci = list(pipeline(genome))
 
     _, warnings = describe_input(genome)
@@ -275,7 +275,7 @@ needs_real_reads = pytest.mark.skipif(not (DATA_DIR / REAL_READS[0]).exists(),
 
 @pytest.fixture(scope="module")
 def real_reads(target_db):
-    with Pipeline(target_db, max_feature_hops=0, mode='collapse', min_coverage=0.30) as pipeline:
+    with Pipeline(target_db, flank_budget=0, mode='collapse', min_coverage=0.30) as pipeline:
         return list(pipeline(GenomeAssembly.from_file(DATA_DIR / REAL_READS[0])))
 
 
@@ -491,7 +491,7 @@ def run_eris_with_genes(genome_file: str, target_db, placer, mode: str = 'collap
     if mode not in runs_by_mode:
         runs = runs_by_mode[mode] = {}
         for hops in (RELATION_HOPS, REACH_HOPS):
-            with Pipeline(target_db, max_feature_hops=hops, mode=mode, min_coverage=0.30) as pipeline:
+            with Pipeline(target_db, flank_budget=hops, mode=mode, min_coverage=0.30) as pipeline:
                 runs[hops] = list(pipeline(genome, genes))
     return genome, runs_by_mode[mode], genes, place
 

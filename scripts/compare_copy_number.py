@@ -306,7 +306,7 @@ def map_to_replicons(genome: GenomeAssembly, contigs: set[str], reference: Path)
 
 def compare(label: str, genome: GenomeAssembly, truth_file: Path, db: TargetDatabase, families: dict[str, str],
             reference: Path | None) -> None:
-    with Pipeline(db, max_feature_hops=0, mode="collapse", min_coverage=0.30) as pipeline:
+    with Pipeline(db, flank_budget=0, mode="collapse", min_coverage=0.30) as pipeline:
         loci = [locus for locus in pipeline(genome) if locus.targets]
     lengths, depths = genome.contig_lengths, genome.contig_depths
     overlap = max((e.overlap for e in genome.edges), default=0)

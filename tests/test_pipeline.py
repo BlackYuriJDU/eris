@@ -28,13 +28,13 @@ def _batch(rows, strands=None):
     )
 
 
-def _builder(lengths, edges=(), mode='variant', depths=None, intervals=None, max_feature_hops=0, circular=frozenset(),
+def _builder(lengths, edges=(), mode='variant', depths=None, intervals=None, flank_budget=0, circular=frozenset(),
              **builder_args):
     depths = depths if depths is not None else {c: 10.0 for c in lengths}
     genome = GenomeAssembly("test", {c: Seq("A" * n) for c, n in lengths.items()}, list(edges), depths, lengths,
                             frozenset(circular))
     engine = TopologyEngine(list(edges), lengths, depths, mode=mode, circular=circular)
-    return LocusBuilder(engine, genome, max_feature_hops=max_feature_hops, gene_intervals=intervals, **builder_args)
+    return LocusBuilder(engine, genome, flank_budget=flank_budget, gene_intervals=intervals, **builder_args)
 
 
 def test_assemble_drops_local_alignments_below_min_identity():
@@ -76,7 +76,7 @@ def test_two_abutting_copies_of_different_iss_are_two_loci_each_with_its_own_str
     features = {"ctgA": [GenomicFeature(f"g{s}", FeatureType.CDS, [LocationSegment("ctgA", s, e, Strand.FORWARD)])
                          for s, e in genes]}
     no_indels = {"ctgA": [SimpleNamespace(insertions=[], deletions=[]) for _ in genes]}
-    builder = _builder({"ctgA": 5000}, intervals=intervals, max_feature_hops=1, features=features, genes=no_indels)
+    builder = _builder({"ctgA": 5000}, intervals=intervals, flank_budget=1, features=features, genes=no_indels)
     alignments = {"ctgA": _batch([("ISEc9", 1000, 0, 1000, "ctgA", 5000, 1000, 2000, 1000, 1000),
                                   ("IS5", 1202, 0, 1202, "ctgA", 5000, 1998, 3200, 1202, 1202)],
                                  strands=[Strand.FORWARD, Strand.REVERSE])}
@@ -254,7 +254,7 @@ def _flank_builder(lengths, edges, gene_spans, mode='variant', **builder_args):
     features = {c: [GenomicFeature(f"gene_{c}", FeatureType.CDS, [LocationSegment(c, s, e, Strand.FORWARD)])]
                 for c, (s, e) in gene_spans.items()}
     no_indels = {c: [SimpleNamespace(insertions=[], deletions=[])] for c in gene_spans}
-    return _builder(lengths, edges, mode=mode, intervals=intervals, max_feature_hops=1, features=features,
+    return _builder(lengths, edges, mode=mode, intervals=intervals, flank_budget=1, features=features,
                     genes=no_indels, **builder_args)
 
 

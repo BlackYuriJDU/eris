@@ -187,7 +187,8 @@ def main():
     from eris.pipeline import Pipeline
 
     # Hook up the OutputManager parameters explicitly
-    with (Pipeline(target_db, args.flank_genes, args.tolerance, args.max_workers, mode=args.mode,
+    with (Pipeline(target_db, flank_budget=args.flank_genes, locus_tolerance=args.tolerance,
+                   max_workers=args.max_workers, mode=args.mode,
                    min_coverage=args.min_coverage, min_identity=args.min_identity,
                    max_flank_distance=args.max_flank_distance) as pipeline,
           OutputManager(args.outprefix, write_gff=not args.no_gff, write_faa=not args.no_faa, write_fna=not args.no_fna, mode=args.mode) as out):
