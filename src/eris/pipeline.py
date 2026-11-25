@@ -233,13 +233,12 @@ class LocusBuilder:
     It uses the TopologyEngine to resolve graph-spanning alignments and then
     identifies flanking and passenger genes for each identified locus.
     """
-    __slots__ = ('topology_engine', 'genome', 'target_feature_type', 'max_feature_hops',
-                 'locus_tolerance', 'features', 'genes', 'gene_intervals', 'max_flank_distance', 'alignments',
-                 'flank_search')
+    __slots__ = ('topology_engine', 'genome', 'target_feature_type', 'locus_tolerance', 'features', 'genes',
+                 'gene_intervals', 'alignments', 'flank_search')
 
     def __init__(self, topology_engine: 'TopologyEngine', genome: 'GenomeAssembly',
                  target_feature_type: FeatureType = FeatureType.CDS,
-                 max_feature_hops: int = 3, locus_tolerance: int = 0,
+                 flank_budget: int = 3, locus_tolerance: int = 0,
                  features: dict[str, list[GenomicFeature]] = None,
                  genes: dict[str, list[Gene]] = None,
                  max_flank_distance: Optional[int] = DEFAULT_MAX_FLANK_DISTANCE,
@@ -251,7 +250,7 @@ class LocusBuilder:
             topology_engine: Engine for graph traversal.
             genome: The full assembly and metadata.
             target_feature_type: Classification for primary alignment targets.
-            max_feature_hops: Max contextual genes to look for in each direction.
+            flank_budget: The maximum number of flank genes reported on each side of a locus.
             locus_tolerance: Alignments up to this many bp apart share a locus; at 0, only those on one IS copy do.
             features: Dictionary of GenomicFeatures per contig.
             genes: Dictionary of PyFGS Gene objects per contig.
@@ -263,15 +262,13 @@ class LocusBuilder:
         self.topology_engine = topology_engine
         self.genome = genome
         self.target_feature_type = target_feature_type
-        self.max_feature_hops = max_feature_hops
         self.locus_tolerance = locus_tolerance
         self.features = features or {}
         self.genes = genes or {}
-        self.max_flank_distance = max_flank_distance
         self.gene_intervals = gene_intervals or {}
         self.alignments: dict[str, AlignmentBatch] = {}
         rule = BudgetRule.PER_BRANCH if self._collapse else BudgetRule.SHARED
-        self.flank_search = FlankSearch(topology_engine, self.gene_intervals, max_feature_hops, max_flank_distance,
+        self.flank_search = FlankSearch(topology_engine, self.gene_intervals, flank_budget, max_flank_distance,
                                         rule)
 
     @property
@@ -589,11 +586,11 @@ class Pipeline:
     gene calling, graph building, and locus assembly. Uses a thread pool
     for parallel contig processing.
     """
-    __slots__ = ('target_db', '_gene_finder', 'max_feature_hops', 'locus_tolerance', '_executor', 'mode', 'min_coverage',
+    __slots__ = ('target_db', '_gene_finder', 'flank_budget', 'locus_tolerance', '_executor', 'mode', 'min_coverage',
                  'min_identity', 'max_flank_distance')
     _THREAD_LOCAL = thread_local()
 
-    def __init__(self, target_db: 'TargetDatabase', max_feature_hops: int = 3, locus_tolerance: int = 0,
+    def __init__(self, target_db: 'TargetDatabase', flank_budget: int = 3, locus_tolerance: int = 0,
                  max_workers: Optional[int] = None, mode: str = 'variant', min_coverage: float = 0.30,
                  min_identity: float = 0.0, max_flank_distance: Optional[int] = DEFAULT_MAX_FLANK_DISTANCE):
         """
@@ -601,7 +598,7 @@ class Pipeline:
 
         Args:
             target_db: Database of mapping targets (e.g. antibiotic resistance genes).
-            max_feature_hops: Contextual search depth.
+            flank_budget: The maximum number of flank genes reported on each side of a locus.
             locus_tolerance: Merging tolerance for adjacent hits.
             max_workers: Number of threads for parallel processing.
             mode: Resolution mode, 'variant' or 'collapse'.
@@ -611,7 +608,7 @@ class Pipeline:
                 None for no limit.
         """
         self.target_db = target_db
-        self.max_feature_hops = max_feature_hops
+        self.flank_budget = flank_budget
         self.locus_tolerance = locus_tolerance
         self.mode = mode
         self.min_coverage = min_coverage
@@ -690,7 +687,7 @@ class Pipeline:
             topology_engine=topology_engine,
             genome=genome,
             target_feature_type=self.target_db.feature_type,
-            max_feature_hops=self.max_feature_hops,
+            flank_budget=self.flank_budget,
             locus_tolerance=self.locus_tolerance,
             features=gene_features,
             genes=gene_cds,
