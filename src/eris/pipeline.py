@@ -14,7 +14,8 @@ from mappy import ThreadBuffer
 from pyfgs import GeneFinder, Model, Gene, Mutation
 
 from eris.io import TargetDatabase, GenomeAssembly, gene_id
-from eris.graph import TopologyEngine, Edge, Branch, OVERLAP_SLACK
+from eris.graph import TopologyEngine, Edge, OVERLAP_SLACK
+from eris.flanks import FlankSearch, FlankCandidate, Flanks, TargetSpan, Branch, RepeatHub, BudgetRule
 from eris.alignment import AlignmentBatch, AlignmentRecord, pooled_identity
 from eris.interval import IntervalBatch, Context, Strand, Interval
 from eris.constants import FeatureType, Orientation, Effect, DEFAULT_MAX_FLANK_DISTANCE
@@ -233,14 +234,16 @@ class LocusBuilder:
     identifies flanking and passenger genes for each identified locus.
     """
     __slots__ = ('topology_engine', 'genome', 'target_feature_type', 'max_feature_hops',
-                 'locus_tolerance', 'features', 'genes', 'max_flank_distance', 'alignments')
+                 'locus_tolerance', 'features', 'genes', 'gene_intervals', 'max_flank_distance', 'alignments',
+                 'flank_search')
 
     def __init__(self, topology_engine: 'TopologyEngine', genome: 'GenomeAssembly',
                  target_feature_type: FeatureType = FeatureType.CDS,
                  max_feature_hops: int = 3, locus_tolerance: int = 0,
                  features: dict[str, list[GenomicFeature]] = None,
                  genes: dict[str, list[Gene]] = None,
-                 max_flank_distance: Optional[int] = DEFAULT_MAX_FLANK_DISTANCE):
+                 max_flank_distance: Optional[int] = DEFAULT_MAX_FLANK_DISTANCE,
+                 gene_intervals: Optional[dict[str, IntervalBatch]] = None):
         """
         Initialize the LocusBuilder.
 
@@ -254,6 +257,8 @@ class LocusBuilder:
             genes: Dictionary of PyFGS Gene objects per contig.
             max_flank_distance: Max distance (bp) from the target to a flank, on its own contig or across the
                 graph; None for no limit.
+            gene_intervals: Each contig's genes as intervals sorted by start, indexing `features` and `genes` by
+                their original indices.
         """
         self.topology_engine = topology_engine
         self.genome = genome
@@ -263,7 +268,16 @@ class LocusBuilder:
         self.features = features or {}
         self.genes = genes or {}
         self.max_flank_distance = max_flank_distance
+        self.gene_intervals = gene_intervals or {}
         self.alignments: dict[str, AlignmentBatch] = {}
+        rule = BudgetRule.PER_BRANCH if self._collapse else BudgetRule.SHARED
+        self.flank_search = FlankSearch(topology_engine, self.gene_intervals, max_feature_hops, max_flank_distance,
+                                        rule)
+
+    @property
+    def _collapse(self) -> bool:
+        """Whether loci are resolved in collapse mode, one per repeat hub, rather than variant mode."""
+        return getattr(self.topology_engine, 'mode', 'variant') == 'collapse'
 
     def assemble(self, alignments: dict, min_coverage: float = 0.30, min_identity: float = 0.0) -> Iterable['Locus']:
         """
@@ -287,7 +301,7 @@ class LocusBuilder:
             coverage = (path[-1].q_end - path[0].q_start) / path[0].q_length
             if coverage >= min_coverage and pooled_identity(path) >= min_identity:
                 kept_paths.append(path)
-        if getattr(self.topology_engine, 'mode', 'variant') == 'collapse':
+        if self._collapse:
             kept_paths = self._one_path_per_hub(kept_paths)
         for path in kept_paths:
             yield self._stitch(path)
@@ -299,7 +313,7 @@ class LocusBuilder:
             intact_batch = batch.filter(cov_mask & id_mask)
 
             if len(intact_batch) > 0:
-                contig_gene_intervals = self.topology_engine.features.get(contig_id, IntervalBatch.empty())
+                contig_gene_intervals = self.gene_intervals.get(contig_id, IntervalBatch.empty())
                 for locus in self._build_local(contig_id, intact_batch, contig_gene_intervals):
                     yield locus
 
@@ -336,7 +350,7 @@ class LocusBuilder:
         of the target, which brings more partial gene calls than flanks. Variant mode has none: each path through a
         hub is its own locus.
         """
-        if getattr(self.topology_engine, 'mode', 'variant') != 'collapse':
+        if not self._collapse:
             return [], []
         overlap = max((e.overlap for e in self.genome.edges), default=0)
         hub: dict[str, Strand] = {}
@@ -404,21 +418,44 @@ class LocusBuilder:
                 best = (gap, past)
         return 0 if best is None else best[1]
 
-    def _resolve_relation(self, contig: str, idx: int, interval_batch: 'IntervalBatch',
-                          spatial: Context, dist: int, topo: int, target_strand: Strand,
-                          target_bounds: tuple[int, int]) -> FeatureRelation:
-        """Analyzes and creates a FeatureRelation for a specific gene-target pair."""
+    def _repeat_hub(self, fragments: list['AlignmentRecord']) -> Optional[RepeatHub]:
+        """
+        The branches of a stitched path's repeat hub (see `_hub_branch_links`), each with the target its copy carries
+        onto the branch (see `_target_past_link`); None if it has none. Once a hub's branches are walked, none may loop
+        back into the stitched path: its genes are passengers.
+        """
+        u_links, d_links = self._hub_branch_links(fragments)
+        if not (u_links or d_links):
+            return None
+        return RepeatHub(tuple(Branch(e, self._target_past_link(e)) for e in u_links),
+                         tuple(Branch(e, self._target_past_link(e)) for e in d_links),
+                         frozenset(f.t_name for f in fragments))
 
-        orig_idx = interval_batch.original_indices[idx]  # type: int
+    def _add_flanks(self, locus: 'Locus', flanks: 'Flanks', first: TargetSpan,
+                    last: Optional[TargetSpan] = None) -> None:
+        """Adds the flanks the flank search found, upstream of `first` and downstream of `last`, to the locus."""
+        locus.upstream_flanks.extend(self._flank(c, first) for c in flanks.upstream)
+        locus.downstream_flanks.extend(self._flank(c, last or first) for c in flanks.downstream)
+
+    def _passenger(self, contig: str, idx: int, intervals: 'IntervalBatch', target_strand: Strand,
+                   target_bounds: tuple[int, int]) -> FeatureRelation:
+        """The relation of gene `idx` of `intervals`, inside the target's span, to the target."""
+        gene_strand = Strand(intervals.strands[idx])
+        spatial = Interval(target_bounds[0], target_bounds[1], target_strand).relate(
+            Interval(intervals.starts[idx], intervals.ends[idx], gene_strand))
+        return self._resolve_relation(contig, int(intervals.original_indices[idx]), gene_strand, spatial, 0, 0,
+                                      target_strand, target_bounds)
+
+    def _flank(self, candidate: FlankCandidate, span: TargetSpan) -> FeatureRelation:
+        """The relation of a flank the flank search found on one side of `span` to its target."""
+        return self._resolve_relation(candidate.contig, candidate.gene_index, candidate.strand, candidate.context,
+                                      candidate.gap, candidate.hops, span.strand, (span.start, span.end))
+
+    def _resolve_relation(self, contig: str, orig_idx: int, gene_strand: Strand, spatial: Context, dist: int,
+                          topo: int, target_strand: Strand, target_bounds: tuple[int, int]) -> FeatureRelation:
+        """Creates a FeatureRelation for a gene, by its original index on its contig, and a target."""
         feature = self.features[contig][orig_idx]  # type: GenomicFeature
         raw_pyfgs_gene = self.genes[contig][orig_idx]  # type: Gene
-        gene_strand = Strand(interval_batch.strands[idx])
-
-        # Determine strict relational spatial context natively using coordinate limits for local genes
-        if topo == 0:
-            target_interval = Interval(target_bounds[0], target_bounds[1], target_strand)
-            gene_interval = Interval(interval_batch.starts[idx], interval_batch.ends[idx], gene_strand)
-            spatial = target_interval.relate(gene_interval)
 
         effect = Effect.NONE
 
@@ -449,95 +486,6 @@ class LocusBuilder:
             topological_dist=topo, orientation=orientation, effect=effect
         )
 
-    @staticmethod
-    def _before_target_across_origin(intervals: 'IntervalBatch', original_index: int, walk_direction: int,
-                                     target_bounds: tuple[int, int]) -> bool:
-        """
-        Whether a gene that a walk reaches back on its own contig, across the origin of a circular contig, lies
-        wholly before the target in the walk's direction. Going any further round the circle would reach the target
-        itself. On a circle with few genes, a gene can still flank the target on both sides.
-        """
-        j = int(np.flatnonzero(intervals.original_indices == original_index)[0])
-        if walk_direction == 1:
-            return bool(intervals.ends[j] <= target_bounds[0])
-        return bool(intervals.starts[j] >= target_bounds[1])
-
-    def _extract_flanks(self, contig: str, boundary: int, walk_direction: int,
-                        context: Context, intervals: Optional['IntervalBatch'], dest_list: list,
-                        target_strand: Strand, target_bounds: tuple[int, int], claimed: set[tuple[str, int]],
-                        branch_links: Iterable[Edge] = (), blocked: frozenset[str] = frozenset(),
-                        target_past_end: int = 0):
-        """
-        Walks the contig (and graph) from a boundary to find flanking features. `claimed` holds the genes the graph
-        walks have already reported for this locus (see TopologyEngine.traverse); start a new one for each locus.
-        Features further than `max_flank_distance` from the boundary are left out, wherever they lie (#55).
-        `branch_links` are the other links leaving a repeat hub on this side, each walked as its own branch with the
-        full flank budget (#56); flanks along them are measured from where that branch's own copy of the target ends:
-        the hub's edge, where the link leaves it, plus any target the copy carries onto the branch's first contig (#65).
-        The graph walk never enters a `blocked` contig. A gene across a link that runs back over the target's end is
-        0 bp away and overlaps the target's start (upstream) or end (downstream), as a local gene would (#64).
-        `target_past_end` is how much of the target runs on past the contig end the walk leaves by (see
-        `_target_past_contig_end`): flanks across the graph are measured from where the target ends, not the boundary
-        (#66). Local flanks are not: the target's alignment then reaches the contig end, so there are none on that side.
-        """
-        rem_hops = self.max_feature_hops
-        exit_strand = Strand.REVERSE if walk_direction == -1 else Strand.FORWARD
-        limit = self.max_flank_distance
-
-        # 1. Local Search
-        if intervals:
-            if walk_direction == -1:
-                idx = np.searchsorted(intervals.ends, boundary, side='right')
-                for i in reversed(range(max(0, idx - self.max_feature_hops), idx)):
-                    d = max(0, boundary - intervals.ends[i])
-                    if limit is not None and d > limit: continue
-                    f = self._resolve_relation(contig, i, intervals, context, int(d), 0, target_strand, target_bounds)
-                    dest_list.append(f)
-                    rem_hops -= 1
-            else:
-                idx = np.searchsorted(intervals.starts, boundary, side='left')
-                for i in range(idx, min(len(intervals), idx + self.max_feature_hops)):
-                    d = max(0, intervals.starts[i] - boundary)
-                    if limit is not None and d > limit: continue
-                    f = self._resolve_relation(contig, i, intervals, context, int(d), 0, target_strand, target_bounds)
-                    dest_list.append(f)
-                    rem_hops -= 1
-
-        # 2. Graph Spillover
-        # The walk reads the contig along its direction from 0, so the boundary sits here in its coordinates, and
-        # the target ends this far past it, on the next contig if its alignment runs off this one
-        walk_boundary = boundary if walk_direction == 1 else self.genome.contig_lengths[contig] - boundary
-        target_end = walk_boundary + target_past_end
-        # The link's source contig, in the hub, is placed to end at the target's end, then pulled back by the target its
-        # copy carries onto the next contig, so a flank across the link is measured from that copy's end of the target
-        branches = [Branch(e, self.max_feature_hops,
-                           target_end - self.genome.contig_lengths[e.u] - self._target_past_link(e))
-                    for e in branch_links]
-        if rem_hops > 0 or branches:
-            reach = None if limit is None else target_end + limit
-            for s_ctg, node_depth, batch in self.topology_engine.traverse(contig, exit_strand, rem_hops, claimed,
-                                                                          reach, branches, blocked):
-                across_origin = s_ctg == contig and contig in self.topology_engine.circular
-                for i in range(len(batch)):
-                    if across_origin and not self._before_target_across_origin(
-                            self.topology_engine.features[contig], batch.original_indices[i], walk_direction,
-                            target_bounds):
-                        continue
-                    # The traversal counts each link's overlap once, so a negative gap is a gene that runs back
-                    # across the target's end, such as one starting in the overlap of the next contig (#64)
-                    d = batch.starts[i] - target_end
-                    spatial = context
-                    if d < 0:
-                        # Upstream crosses the target's start and downstream its end, in the target's direction, as
-                        # Interval.relate gives a local gene
-                        spatial = Context.OVERLAPPING_START if context == Context.UPSTREAM \
-                            else Context.OVERLAPPING_END
-                        d = 0
-                    dest_list.append(
-                        self._resolve_relation(s_ctg, i, batch, spatial, int(d), node_depth, target_strand,
-                                               target_bounds)
-                    )
-
     def _build_local(self, contig: str, alignment_batch: 'AlignmentBatch', gene_intervals: 'IntervalBatch') -> list[
         'Locus']:
         """
@@ -567,26 +515,14 @@ class LocusBuilder:
             primary_strand = Strand(targets[0].strand)
             span_bounds = (span.start, span.end)
 
-            internal_indices = gene_intervals.query(span.start, span.end)
-            for idx in internal_indices:
-                locus.passengers.append(
-                    self._resolve_relation(contig, idx, gene_intervals, Context.INSIDE, 0, 0, primary_strand,
-                                           span_bounds))
+            for idx in gene_intervals.query(span.start, span.end):
+                locus.passengers.append(self._passenger(contig, idx, gene_intervals, primary_strand, span_bounds))
 
-            if primary_strand == Strand.REVERSE:
-                u_dir, u_bound = 1, span.end
-                d_dir, d_bound = -1, span.start
-            else:
-                u_dir, u_bound = -1, span.start
-                d_dir, d_bound = 1, span.end
-
-            claimed: set[tuple[str, int]] = set()
-            self._extract_flanks(contig, u_bound, u_dir, Context.UPSTREAM, gene_intervals, locus.upstream_flanks,
-                                 primary_strand, span_bounds, claimed,
-                                 target_past_end=self._target_past_contig_end(targets, u_dir))
-            self._extract_flanks(contig, d_bound, d_dir, Context.DOWNSTREAM, gene_intervals, locus.downstream_flanks,
-                                 primary_strand, span_bounds, claimed,
-                                 target_past_end=self._target_past_contig_end(targets, d_dir))
+            # Upstream of a '+' target, the walk leaves its contig by the start
+            target = TargetSpan(contig, span.start, span.end, primary_strand,
+                                self._target_past_contig_end(targets, -primary_strand),
+                                self._target_past_contig_end(targets, primary_strand))
+            self._add_flanks(locus, self.flank_search.search(target), target)
 
             loci.append(locus)
 
@@ -597,7 +533,7 @@ class LocusBuilder:
         first = fragments[0]
         last = fragments[-1]
 
-        if getattr(self.topology_engine, 'mode', 'variant') == 'collapse':
+        if self._collapse:
             metric_val = 1.0  # Copy number is set once every locus is built (see assign_copy_numbers)
         elif not self.genome.has_depth:
             metric_val = None
@@ -626,42 +562,21 @@ class LocusBuilder:
             fractional_depth=metric_val  # Holds either frac_depth or copy_number; NEW: Assign it to the Locus
         )
 
-        # 2. UPSTREAM FLANKS (Strictly from the first fragment)
-        u_dir = -1 if first.strand == 1 else 1
-        u_bound = first.t_start if first.strand == 1 else first.t_end
-        u_ints = self.topology_engine.features.get(first.t_name)
-        claimed: set[tuple[str, int]] = set()
-        u_links, d_links = self._hub_branch_links(fragments)
-        # Once a hub's branches are walked, none may loop back into the stitched path: its genes are passengers
-        blocked = frozenset(f.t_name for f in fragments) if u_links or d_links else frozenset()
-        self._extract_flanks(
-            first.t_name, u_bound, u_dir, Context.UPSTREAM, u_ints, locus.upstream_flanks,
-            Strand(first.strand), (first.t_start, first.t_end), claimed, u_links, blocked,
-            self._target_past_contig_end([first], u_dir)
-        )
+        # 2. FLANKS: upstream from the first fragment, downstream from the last
+        first_span = TargetSpan(first.t_name, first.t_start, first.t_end, Strand(first.strand),
+                                beyond_upstream=self._target_past_contig_end([first], -first.strand))
+        last_span = TargetSpan(last.t_name, last.t_start, last.t_end, Strand(last.strand),
+                               beyond_downstream=self._target_past_contig_end([last], last.strand))
+        flanks = self.flank_search.search(first_span, last_span, hub=self._repeat_hub(fragments))
+        self._add_flanks(locus, flanks, first_span, last_span)
 
-        # 3. DOWNSTREAM FLANKS (Strictly from the last fragment)
-        v_dir = 1 if last.strand == 1 else -1
-        v_bound = last.t_end if last.strand == 1 else last.t_start
-        v_ints = self.topology_engine.features.get(last.t_name)
-        self._extract_flanks(
-            last.t_name, v_bound, v_dir, Context.DOWNSTREAM, v_ints, locus.downstream_flanks,
-            Strand(last.strand), (last.t_start, last.t_end), claimed, d_links, blocked,
-            self._target_past_contig_end([last], v_dir)
-        )
-
-        # 4. INSIDE PASSENGERS (Sweep across ALL fragments, including unaligned synthetic bubbles)
+        # 3. INSIDE PASSENGERS (Sweep across ALL fragments, including unaligned synthetic bubbles)
         for frag in fragments:
-            f_ints = self.topology_engine.features.get(frag.t_name)
+            f_ints = self.gene_intervals.get(frag.t_name)
             if f_ints:
-                internal_indices = f_ints.query(frag.t_start, frag.t_end)
-                for idx in internal_indices:
-                    locus.passengers.append(
-                        self._resolve_relation(
-                            frag.t_name, idx, f_ints, Context.INSIDE, 0, 0,
-                            Strand(frag.strand), (frag.t_start, frag.t_end)
-                        )
-                    )
+                for idx in f_ints.query(frag.t_start, frag.t_end):
+                    locus.passengers.append(self._passenger(frag.t_name, idx, f_ints, Strand(frag.strand),
+                                                            (frag.t_start, frag.t_end)))
 
         return locus
 
@@ -768,7 +683,6 @@ class Pipeline:
             edges=genome.edges,
             contig_lengths=genome.contig_lengths,
             contig_depths=genome.contig_depths,
-            features=gene_intervals,
             mode=self.mode,
             circular=genome.circular)
 
@@ -780,7 +694,8 @@ class Pipeline:
             locus_tolerance=self.locus_tolerance,
             features=gene_features,
             genes=gene_cds,
-            max_flank_distance=self.max_flank_distance
+            max_flank_distance=self.max_flank_distance,
+            gene_intervals=gene_intervals
         )
 
         loci = builder.assemble(alignments, min_coverage=self.min_coverage, min_identity=self.min_identity)
