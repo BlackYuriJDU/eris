@@ -468,10 +468,9 @@ class LocusBuilder:
             for idx in gene_intervals.query(span.start, span.end):
                 locus.passengers.append(self._passenger(contig, idx, gene_intervals, primary_strand, span_bounds))
 
-            engine = self.topology_engine
             target = TargetSpan(contig, span.start, span.end, primary_strand,
-                                beyond_contig_end(targets, primary_strand, Context.UPSTREAM, engine),
-                                beyond_contig_end(targets, primary_strand, Context.DOWNSTREAM, engine))
+                                beyond_contig_end(targets, primary_strand, Context.UPSTREAM, self.topology_engine),
+                                beyond_contig_end(targets, primary_strand, Context.DOWNSTREAM, self.topology_engine))
             self._add_flanks(locus, self.flank_search.search(target), target)
 
             loci.append(locus)

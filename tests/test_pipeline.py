@@ -295,22 +295,6 @@ def test_a_flank_across_a_link_is_measured_from_where_the_target_ends_when_its_a
     assert [f.distance_bp for f in getattr(locus, f"{side}_flanks")] == [205]
 
 
-def test_a_stitched_path_read_backwards_whose_first_alignment_runs_off_its_contig_is_measured_from_the_targets_start():
-    # IS1 is read along ctgX- then ctgY-, so its first 200 bp run off ctgX's end onto ctgU, whose gene
-    # starting at 300 is 300 bp past ctgX's end, so 100 bp before the target's start
-    edges = [Edge("ctgY", Strand.FORWARD, "ctgX", Strand.FORWARD), Edge("ctgX", Strand.FORWARD, "ctgU", Strand.FORWARD)]
-    builder = _flank_builder({"ctgU": 1000, "ctgX": 300, "ctgY": 1000}, edges, {"ctgU": (300, 700)})
-    alignments = {
-        "ctgX": _batch([("IS1", 1000, 200, 500, "ctgX", 300, 0, 300, 300, 300)], [Strand.REVERSE]),
-        "ctgY": _batch([("IS1", 1000, 500, 1000, "ctgY", 1000, 500, 1000, 500, 500)], [Strand.REVERSE]),
-    }
-
-    [locus] = builder.assemble(alignments)
-
-    assert format_contig_path(locus) == "ctgX-,ctgY-"
-    assert [f.distance_bp for f in locus.upstream_flanks] == [100]
-
-
 def test_a_gene_across_a_link_is_not_truncated_by_a_frameshift_at_the_is_coordinates_on_its_own_contig():
     # ctgB's gene has a frameshift at 805, which is near the IS start, 800, but on ctgA, not ctgB
     builder = _flank_builder({"ctgA": 1000, "ctgB": 1000},

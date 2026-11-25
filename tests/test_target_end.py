@@ -94,14 +94,14 @@ def test_a_synthetic_stitch_record_does_not_run_past_the_contig_end():
 
 
 # Carried past a hub branch's link (#65) -------------------------------------------------------------------------------
-B_LENGTHS = {"b2": 1000, "b3": 1000, "a2": 5000}
+BRANCH_LENGTHS = {"b2": 1000, "b3": 1000, "a2": 5000}
 
 
 def test_a_copy_entering_a_branch_carries_its_target_past_the_links_overlap():
     # b2 shares 100 bp with the hub; the copy runs to 200 on it
     alignments = {"b2": _batch([(1600, 1400, 1600, "b2", 1000, 0, 200)])}
 
-    assert carried_past_link(Edge("hub", F, "b2", F, overlap=100), alignments, B_LENGTHS) == 100
+    assert carried_past_link(Edge("hub", F, "b2", F, overlap=100), alignments, BRANCH_LENGTHS) == 100
 
 
 @pytest.mark.parametrize("link, alignments", [
@@ -111,21 +111,22 @@ def test_a_copy_entering_a_branch_carries_its_target_past_the_links_overlap():
     (Edge("hub", R, "a2", R), {"a2": _batch([(1600, 0, 150, "a2", 5000, 4850, 5000)])}),
 ])
 def test_a_copy_entering_a_branch_read_backwards_carries_its_target_from_the_contigs_end(link, alignments):
-    assert carried_past_link(link, alignments, B_LENGTHS) == 150
+    assert carried_past_link(link, alignments, BRANCH_LENGTHS) == 150
 
 
 def test_an_alignment_starting_past_the_overlap_is_not_carried_past_the_link():
-    # IS3X starts on b2 just where the 100 bp it shares with the hub ends: another IS beside this copy
+    # An alignment starting on b2 just where the 100 bp it shares with the hub ends is another IS beside this copy
     alignments = {"b2": _batch([(1200, 1050, 1200, "b2", 1000, 100, 250)])}
 
-    assert carried_past_link(Edge("hub", F, "b2", F, overlap=100), alignments, B_LENGTHS) == 0
+    assert carried_past_link(Edge("hub", F, "b2", F, overlap=100), alignments, BRANCH_LENGTHS) == 0
 
 
-def test_an_alignment_starting_within_the_entry_slack_is_carried_past_the_link():
-    alignments = {"b2": _batch([(1600, 1400, 1590, "b2", 1000, 10, 200)])}
+@pytest.mark.parametrize("start, carried", [(10, 200), (11, 0)])
+def test_only_an_alignment_starting_within_the_entry_slack_is_carried_past_the_link(start, carried):
+    alignments = {"b2": _batch([(1600, 1400, 1590 - start, "b2", 1000, start, 200)])}
 
-    assert carried_past_link(Edge("hub", F, "b2", F), alignments, B_LENGTHS) == 200
+    assert carried_past_link(Edge("hub", F, "b2", F), alignments, BRANCH_LENGTHS) == carried
 
 
 def test_a_branch_with_no_alignments_carries_nothing():
-    assert carried_past_link(Edge("hub", F, "b2", F, overlap=100), {}, B_LENGTHS) == 0
+    assert carried_past_link(Edge("hub", F, "b2", F, overlap=100), {}, BRANCH_LENGTHS) == 0
