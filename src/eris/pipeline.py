@@ -368,8 +368,8 @@ class LocusBuilder:
             return None
         lengths = self.genome.contig_lengths
         return HubBranches(tuple(Branch(e, carried_past_link(e, self.alignments, lengths)) for e in u_links),
-                         tuple(Branch(e, carried_past_link(e, self.alignments, lengths)) for e in d_links),
-                         frozenset(f.t_name for f in fragments))
+                           tuple(Branch(e, carried_past_link(e, self.alignments, lengths)) for e in d_links),
+                           frozenset(f.t_name for f in fragments))
 
     def _add_flanks(self, locus: 'Locus', flanks: 'Flanks', first: TargetSpan,
                     last: Optional[TargetSpan] = None) -> None:

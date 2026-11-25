@@ -86,8 +86,8 @@ class Hubs:
         return self._hub((seg.contig, seg.strand) for target in locus.targets for seg in target.segments
                          if self._covers(self.contig_lengths[seg.contig], seg.start, seg.end))
 
-    @staticmethod
-    def group(hubs: list[RepeatHub]) -> list[tuple[RepeatHub, list[int]]]:
+    @classmethod
+    def group(cls, hubs: list[RepeatHub]) -> list[tuple[RepeatHub, list[int]]]:
         """
         Merges hubs that share a contig, directly or through another hub, so near-identical targets walking through one
         collapsed repeat (#14) are one. Returns each merged hub with its members' indices into `hubs`; an empty hub
@@ -106,7 +106,7 @@ class Hubs:
                     members = other_members + members
                 else:
                     kept.append((other, other_members))
-            merged = kept + [(Hubs._hub(covered + list(hub.contigs)), members + [i])]
+            merged = kept + [(cls._hub(covered + list(hub.contigs)), members + [i])]
         return merged
 
     def _links_out(self, contig: str, strand: Strand, side: int, hub: RepeatHub) -> list[Edge]:

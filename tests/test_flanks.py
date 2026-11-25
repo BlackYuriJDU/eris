@@ -396,9 +396,9 @@ _FIRST, _LAST = TargetSpan("a1", 4700, 5000, F), TargetSpan("b1", 0, 300, F)
 
 def _branches(carried=0, blocked=frozenset()):
     return HubBranches(upstream=(Branch(Edge("hub", R, "a2", R)),),
-                     downstream=(Branch(Edge("hub", F, "b2", F, overlap=100), carried),
-                                 Branch(Edge("hub", F, "b3", R))),
-                     blocked=blocked)
+                       downstream=(Branch(Edge("hub", F, "b2", F, overlap=100), carried),
+                                   Branch(Edge("hub", F, "b3", R))),
+                       blocked=blocked)
 
 
 def test_each_hub_branch_is_walked_from_the_hubs_edge_with_the_full_budget_after_the_locus_own_ends():
