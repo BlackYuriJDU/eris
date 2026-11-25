@@ -149,15 +149,16 @@ class FlankSearch:
         self.rule = rule
 
     def search(self, first: TargetSpan, last: Optional[TargetSpan] = None, *,
-               hub: Optional[HubBranches] = None) -> Flanks:
+               branches: Optional[HubBranches] = None) -> Flanks:
         """
         The flanks of one locus: upstream of `first` and downstream of `last` (by default `first`), plus along the
         branches of its repeat hub, if any.
         """
-        hub = hub or HubBranches()
+        branches = branches or HubBranches()
         claimed: set[tuple[str, int]] = set()  # genes the graph walks report; shared by both sides, never by loci
-        upstream = self._side_flanks(self._upstream(first), hub.upstream, hub.blocked, claimed)
-        downstream = self._side_flanks(self._downstream(last or first), hub.downstream, hub.blocked, claimed)
+        upstream = self._side_flanks(self._upstream(first), branches.upstream, branches.blocked, claimed)
+        downstream = self._side_flanks(self._downstream(last or first), branches.downstream, branches.blocked,
+                                       claimed)
         return Flanks(upstream, downstream)
 
     @staticmethod

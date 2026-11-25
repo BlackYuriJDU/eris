@@ -1,3 +1,5 @@
+from typing import Iterable
+
 from eris.alignment import AlignmentRecord
 from eris.constants import FeatureType, Strand
 from eris.graph import Edge
@@ -17,7 +19,7 @@ def locus(*segments: tuple[str, int, int, Strand]) -> Locus:
     return Locus("locus", "|".join(s[0] for s in segments), segments[0][1], segments[-1][2], [target], [], [], [])
 
 
-def hubs(lengths: dict[str, int], edges: list[Edge] = ()) -> Hubs:
+def hubs(lengths: dict[str, int], edges: Iterable[Edge] = ()) -> Hubs:
     return Hubs(list(edges), lengths)
 
 

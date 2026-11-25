@@ -357,7 +357,7 @@ class LocusBuilder:
                                   if (e.v, e.v_strand) != (end.t_name, end.strand * side)])
         return links_by_side[0], links_by_side[1]
 
-    def _repeat_hub(self, fragments: list['AlignmentRecord']) -> Optional[HubBranches]:
+    def _hub_branches(self, fragments: list['AlignmentRecord']) -> Optional[HubBranches]:
         """
         The branches of a stitched path's repeat hub (see `_hub_branch_links`), each with the target its copy carries
         onto the branch (see `carried_past_link`); None if it has none. Once a hub's branches are walked, none may loop
@@ -508,7 +508,7 @@ class LocusBuilder:
         last_span = TargetSpan(last.t_name, last.t_start, last.t_end, Strand(last.strand),
                                beyond_downstream=beyond_contig_end([last], Strand(last.strand), Context.DOWNSTREAM,
                                                                    self.topology_engine))
-        flanks = self.flank_search.search(first_span, last_span, hub=self._repeat_hub(fragments))
+        flanks = self.flank_search.search(first_span, last_span, branches=self._hub_branches(fragments))
         self._add_flanks(locus, flanks, first_span, last_span)
 
         # 3. INSIDE PASSENGERS (Sweep across ALL fragments, including unaligned synthetic bubbles)

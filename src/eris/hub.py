@@ -110,6 +110,7 @@ class Hubs:
         return merged
 
     def _links_out(self, contig: str, strand: Strand, side: int, hub: RepeatHub) -> list[Edge]:
+        """The links out of `contig`, read on `strand`, on `side` (see `leaving`) to a contig outside `hub`."""
         return [e for e in self.graph.get_neighbors(contig) if e.u_strand == strand * side and e.v not in hub]
 
     def leaving(self, hub: RepeatHub, side: int) -> list[Edge]:

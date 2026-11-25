@@ -394,7 +394,7 @@ _HUB_GENES = {"a1": [(4000, 4500)], "a2": [(4200, 4600)], "b1": [(500, 800)], "b
 _FIRST, _LAST = TargetSpan("a1", 4700, 5000, F), TargetSpan("b1", 0, 300, F)
 
 
-def _hub(carried=0, blocked=frozenset()):
+def _branches(carried=0, blocked=frozenset()):
     return HubBranches(upstream=(Branch(Edge("hub", R, "a2", R)),),
                      downstream=(Branch(Edge("hub", F, "b2", F, overlap=100), carried),
                                  Branch(Edge("hub", F, "b3", R))),
@@ -406,7 +406,7 @@ def test_each_hub_branch_is_walked_from_the_hubs_edge_with_the_full_budget_after
     # at 750, 250 bp in. Upstream, a2's gene ends 400 bp before the hub
     search = _search(_HUB_LENGTHS, _HUB_EDGES, _HUB_GENES, rule=PER_BRANCH)
 
-    flanks = search.search(_FIRST, _LAST, hub=_hub())
+    flanks = search.search(_FIRST, _LAST, branches=_branches())
 
     assert _found(flanks.downstream) == [("b1", 0, 200, 0), ("b2", 0, 200, 1), ("b3", 0, 250, 1)]
     assert _found(flanks.upstream) == [("a1", 0, 200, 0), ("a2", 0, 400, 1)]
@@ -415,7 +415,7 @@ def test_each_hub_branch_is_walked_from_the_hubs_edge_with_the_full_budget_after
 def test_a_hub_branch_is_measured_from_where_the_target_its_copy_carries_onto_it_ends():
     search = _search(_HUB_LENGTHS, _HUB_EDGES, _HUB_GENES, rule=PER_BRANCH)
 
-    flanks = search.search(_FIRST, _LAST, hub=_hub(carried=100))
+    flanks = search.search(_FIRST, _LAST, branches=_branches(carried=100))
 
     assert ("b2", 0, 100, 1) in _found(flanks.downstream)
 
@@ -423,7 +423,7 @@ def test_a_hub_branch_is_measured_from_where_the_target_its_copy_carries_onto_it
 def test_a_search_never_enters_a_blocked_contig():
     search = _search(_HUB_LENGTHS, _HUB_EDGES, _HUB_GENES, rule=PER_BRANCH)
 
-    flanks = search.search(_FIRST, _LAST, hub=_hub(blocked=frozenset({"b2", "a2"})))
+    flanks = search.search(_FIRST, _LAST, branches=_branches(blocked=frozenset({"b2", "a2"})))
 
     assert _found(flanks.downstream) == [("b1", 0, 200, 0), ("b3", 0, 250, 1)]
     assert _found(flanks.upstream) == [("a1", 0, 200, 0)]
