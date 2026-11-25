@@ -14,12 +14,13 @@ from mappy import ThreadBuffer
 from pyfgs import GeneFinder, Model, Gene, Mutation
 
 from eris.io import TargetDatabase, GenomeAssembly, gene_id
-from eris.graph import TopologyEngine, Edge, OVERLAP_SLACK
+from eris.graph import TopologyEngine, Edge
 from eris.flanks import FlankSearch, FlankCandidate, Flanks, TargetSpan, Branch, RepeatHub, BudgetRule
 from eris.alignment import AlignmentBatch, AlignmentRecord, pooled_identity
 from eris.interval import IntervalBatch, Context, Strand, Interval
 from eris.constants import FeatureType, Orientation, Effect, DEFAULT_MAX_FLANK_DISTANCE
 from eris.copy_number import CopyNumber, assign_copy_numbers, covers_contig
+from eris.target_end import beyond_contig_end, carried_past_link
 
 
 # DataClasses ----------------------------------------------------------------------------------------------------------
@@ -163,7 +164,6 @@ class Locus:
 
 # Constants ------------------------------------------------------------------------------------------------------------
 MIN_SHARED_FRACTION = 0.5  # Of the shorter alignment, for two alignments to be one IS copy
-BRANCH_ENTRY_SLACK = 10  # bp into a hub branch's first contig a copy's target may start and still run on from the hub
 
 
 # Functions ------------------------------------------------------------------------------------------------------------
@@ -367,65 +367,18 @@ class LocusBuilder:
                                   if e.u == outer and (e.v, e.v_strand) != (end.t_name, end.strand * side)])
         return links_by_side[0], links_by_side[1]
 
-    def _target_past_link(self, e: Edge) -> int:
-        """
-        How far a copy's target runs onto a hub branch's first contig `e.v` past the overlap it shares with the hub
-        (#65), read along the walk: the furthest end of a real alignment that starts where the contig is entered,
-        within 10 bp. 0 if none does. The hub's edge is target end to end, so a copy carrying on past it starts in the
-        overlap; an alignment starting past it is another IS beside this one. Synthetic stitch records are left out:
-        they overshoot by one overlap.
-        """
-        batch = self.alignments.get(e.v)
-        if batch is None or not len(batch):
-            return 0
-        if e.v_strand == Strand.FORWARD:
-            starts, ends = batch.t_starts, batch.t_ends
-        else:
-            length = self.genome.contig_lengths[e.v]
-            starts, ends = length - batch.t_ends, length - batch.t_starts
-        entering = starts <= BRANCH_ENTRY_SLACK
-        if not entering.any():
-            return 0
-        return max(0, int(ends[entering].max()) - e.overlap)
-
-    def _target_past_contig_end(self, records: Iterable['AlignmentRecord'], walk_direction: int) -> int:
-        """
-        How much of a locus's target runs on past the contig end a flank walk leaves by (#66): the target bases an
-        alignment leaves unaligned at that end, when it reaches the end within the largest overlap of a link leaving
-        it plus OVERLAP_SLACK and those bases are more than the contig has left, so the rest of the copy is on the next
-        contig. Of several alignments that do, the one nearest the end counts. 0 if none does: an alignment that stops
-        inside the contig, or short of it by more than its unaligned bases, is a truncated copy, whose missing bases
-        are nowhere. Synthetic stitch records are left out: they overshoot by one overlap.
-        """
-        exit_strand = Strand.FORWARD if walk_direction == 1 else Strand.REVERSE
-        best: Optional[tuple[int, int]] = None  # (gap to the contig end, target bases past the alignment there)
-        for rec in records:
-            if rec.idx == -1:
-                continue
-            tolerance = self.topology_engine.exit_overlap(rec.t_name, exit_strand) + OVERLAP_SLACK
-            gap = rec.t_length - rec.t_end if walk_direction == 1 else rec.t_start
-            if gap > tolerance:
-                continue
-            # The target's own 3' end lies past the contig end it is read towards, its 5' end past the other
-            reads_towards = (rec.strand == Strand.FORWARD) == (walk_direction == 1)
-            past = rec.q_length - rec.q_end if reads_towards else rec.q_start
-            if past <= gap:
-                continue  # the rest of the target would fit on this contig, where it does not align
-            if best is None or (gap, -past) < (best[0], -best[1]):
-                best = (gap, past)
-        return 0 if best is None else best[1]
-
     def _repeat_hub(self, fragments: list['AlignmentRecord']) -> Optional[RepeatHub]:
         """
         The branches of a stitched path's repeat hub (see `_hub_branch_links`), each with the target its copy carries
-        onto the branch (see `_target_past_link`); None if it has none. Once a hub's branches are walked, none may loop
+        onto the branch (see `carried_past_link`); None if it has none. Once a hub's branches are walked, none may loop
         back into the stitched path: its genes are passengers.
         """
         u_links, d_links = self._hub_branch_links(fragments)
         if not (u_links or d_links):
             return None
-        return RepeatHub(tuple(Branch(e, self._target_past_link(e)) for e in u_links),
-                         tuple(Branch(e, self._target_past_link(e)) for e in d_links),
+        lengths = self.genome.contig_lengths
+        return RepeatHub(tuple(Branch(e, carried_past_link(e, self.alignments, lengths)) for e in u_links),
+                         tuple(Branch(e, carried_past_link(e, self.alignments, lengths)) for e in d_links),
                          frozenset(f.t_name for f in fragments))
 
     def _add_flanks(self, locus: 'Locus', flanks: 'Flanks', first: TargetSpan,
@@ -515,10 +468,10 @@ class LocusBuilder:
             for idx in gene_intervals.query(span.start, span.end):
                 locus.passengers.append(self._passenger(contig, idx, gene_intervals, primary_strand, span_bounds))
 
-            # Upstream of a '+' target, the walk leaves its contig by the start
+            engine = self.topology_engine
             target = TargetSpan(contig, span.start, span.end, primary_strand,
-                                self._target_past_contig_end(targets, -primary_strand),
-                                self._target_past_contig_end(targets, primary_strand))
+                                beyond_contig_end(targets, primary_strand, Context.UPSTREAM, engine),
+                                beyond_contig_end(targets, primary_strand, Context.DOWNSTREAM, engine))
             self._add_flanks(locus, self.flank_search.search(target), target)
 
             loci.append(locus)
@@ -561,9 +514,11 @@ class LocusBuilder:
 
         # 2. FLANKS: upstream from the first fragment, downstream from the last
         first_span = TargetSpan(first.t_name, first.t_start, first.t_end, Strand(first.strand),
-                                beyond_upstream=self._target_past_contig_end([first], -first.strand))
+                                beyond_upstream=beyond_contig_end([first], Strand(first.strand), Context.UPSTREAM,
+                                                                  self.topology_engine))
         last_span = TargetSpan(last.t_name, last.t_start, last.t_end, Strand(last.strand),
-                               beyond_downstream=self._target_past_contig_end([last], last.strand))
+                               beyond_downstream=beyond_contig_end([last], Strand(last.strand), Context.DOWNSTREAM,
+                                                                   self.topology_engine))
         flanks = self.flank_search.search(first_span, last_span, hub=self._repeat_hub(fragments))
         self._add_flanks(locus, flanks, first_span, last_span)
 

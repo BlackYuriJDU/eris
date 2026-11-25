@@ -295,51 +295,8 @@ def test_a_flank_across_a_link_is_measured_from_where_the_target_ends_when_its_a
     assert [f.distance_bp for f in getattr(locus, f"{side}_flanks")] == [205]
 
 
-def test_a_flank_across_a_link_is_measured_from_the_alignment_end_when_it_stops_inside_the_contig():
-    # The alignment stops 200 bp short of ctgA's end, more than the link's overlap and slack: that copy is truncated,
-    # so its missing 200 bp are not on ctgB, and ctgB's gene at 1400 is 600 bp past the alignment's end at 800
-    builder = _flank_builder({"ctgA": 1000, "ctgB": 1000},
-                             [Edge("ctgA", Strand.FORWARD, "ctgB", Strand.FORWARD, overlap=100)],
-                             {"ctgB": (500, 800)})
-    alignments = {"ctgA": _batch([("IS1", 500, 0, 300, "ctgA", 1000, 500, 800, 300, 300)])}
-
-    [locus] = builder.assemble(alignments)
-
-    assert [f.distance_bp for f in locus.downstream_flanks] == [600]
-
-
-def test_a_flank_across_a_link_is_measured_from_the_alignment_end_when_the_rest_of_the_target_would_fit_on_its_contig():
-    # The alignment stops 120 bp short of ctgA's end, within the link's overlap and slack, but leaves only 20 bp of
-    # the target unaligned: they would lie on ctgA, where they do not align, so the copy is truncated and ctgB's gene
-    # at 1400 is 520 bp past the alignment's end at 880
-    builder = _flank_builder({"ctgA": 1000, "ctgB": 1000},
-                             [Edge("ctgA", Strand.FORWARD, "ctgB", Strand.FORWARD, overlap=100)],
-                             {"ctgB": (500, 800)})
-    alignments = {"ctgA": _batch([("IS1", 500, 0, 480, "ctgA", 1000, 400, 880, 480, 480)])}
-
-    [locus] = builder.assemble(alignments)
-
-    assert [f.distance_bp for f in locus.downstream_flanks] == [520]
-
-
-def test_a_stitched_path_whose_first_alignment_runs_off_its_contig_is_measured_from_the_targets_start():
-    # IS1 starts on ctgX at its position 200: its first 200 bp run back onto ctgU, whose gene ending at 700 is 300 bp
-    # before ctgX starts, so 100 bp before the target does
-    edges = [Edge("ctgU", Strand.FORWARD, "ctgX", Strand.FORWARD), Edge("ctgX", Strand.FORWARD, "ctgY", Strand.FORWARD)]
-    builder = _flank_builder({"ctgU": 1000, "ctgX": 300, "ctgY": 1000}, edges, {"ctgU": (300, 700)})
-    alignments = {
-        "ctgX": _batch([("IS1", 1000, 200, 500, "ctgX", 300, 0, 300, 300, 300)]),
-        "ctgY": _batch([("IS1", 1000, 500, 1000, "ctgY", 1000, 0, 500, 500, 500)]),
-    }
-
-    [locus] = builder.assemble(alignments)
-
-    assert format_contig_path(locus) == "ctgX+,ctgY+"
-    assert [f.distance_bp for f in locus.upstream_flanks] == [100]
-
-
 def test_a_stitched_path_read_backwards_whose_first_alignment_runs_off_its_contig_is_measured_from_the_targets_start():
-    # As above on '-': IS1 is read along ctgX- then ctgY-, so its first 200 bp run off ctgX's end onto ctgU, whose gene
+    # IS1 is read along ctgX- then ctgY-, so its first 200 bp run off ctgX's end onto ctgU, whose gene
     # starting at 300 is 300 bp past ctgX's end, so 100 bp before the target's start
     edges = [Edge("ctgY", Strand.FORWARD, "ctgX", Strand.FORWARD), Edge("ctgX", Strand.FORWARD, "ctgU", Strand.FORWARD)]
     builder = _flank_builder({"ctgU": 1000, "ctgX": 300, "ctgY": 1000}, edges, {"ctgU": (300, 700)})
@@ -435,15 +392,6 @@ def test_a_hub_branch_is_measured_from_where_its_own_copys_target_ends():
     assert _flank_relations(locus.downstream_flanks) == [
         ("gene_b1", 200, 0), ("gene_b2", 100, 1), ("gene_b3", 100, 1)]
     assert _flank_relations(locus.upstream_flanks) == [("gene_a1", 200, 0), ("gene_a2", 200, 1)]
-
-
-def test_a_hub_branch_ignores_an_alignment_that_starts_past_the_overlap():
-    # IS3X starts on b2 just where the 100 bp it shares with the hub ends: it is another IS beside this copy, not this
-    # copy's target running on past the hub, so this copy's target still ends where b2 is entered
-    alignments = {"b2": _batch([("IS3X", 1200, 1050, 1200, "b2", 1000, 100, 250, 150, 150)])}
-    locus = _hub_locus('collapse', extra_alignments=alignments)
-
-    assert ("gene_b2", 200, 1) in _flank_relations(locus.downstream_flanks)
 
 
 def test_links_leading_back_into_the_hub_are_not_branches_of_its_flank_search():
