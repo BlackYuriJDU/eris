@@ -4,6 +4,7 @@ Repeat hubs: the contigs one collapsed repeat covers end to end (docs/adr/0003, 
 Flank branches and copy number both start from a locus's repeat hub. They share how a hub is found, how hubs that share
 a contig are merged, and which links leave it; each keeps its own walk out of it.
 """
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable, Iterator, TYPE_CHECKING
 
@@ -44,26 +45,30 @@ class Hubs:
     Finds the repeat hubs of an assembly's stitched paths and loci, merges those that share a contig, and gives the
     links that leave them.
     """
-    __slots__ = ('graph', 'contig_lengths', '_overlap')
+    __slots__ = ('graph', 'contig_lengths', '_end_overlap')
 
     def __init__(self, edges: list[Edge], contig_lengths: dict[str, int]):
         # A GFA link is written once but holds on both strands, so add its complement for walking the other way
         self.graph = Graph(edges + [e.complement() for e in edges])
         self.contig_lengths = contig_lengths
-        self._overlap = max((e.overlap for e in edges), default=0)  # the largest link overlap in the graph
+        # The largest overlap of the links at each contig end, as (contig, True for its end, False for its start)
+        self._end_overlap: dict[tuple[str, bool], int] = defaultdict(int)
+        for e in edges:
+            for key in ((e.u, e.u_strand == Strand.FORWARD), (e.v, e.v_strand == Strand.REVERSE)):
+                self._end_overlap[key] = max(self._end_overlap[key], e.overlap)
 
     @classmethod
     def from_genome(cls, genome: 'GenomeAssembly') -> 'Hubs':
         """The hubs of an assembly, from its links and contig lengths."""
         return cls(list(genome.edges), genome.contig_lengths)
 
-    def _covers(self, length: int, start: int, end: int) -> bool:
+    def _covers(self, contig: str, length: int, start: int, end: int) -> bool:
         """
-        True if an alignment from `start` to `end` covers a contig of `length` end to end, so it is in a hub. Its
-        shortfall at both ends is summed against the graph's largest link overlap: judging each end against its own
-        overlap made single-copy IS contigs linked at both ends into hubs, and cost copy number edges (#85).
+        True if an alignment from `start` to `end` covers `contig`, of `length`, end to end, so it is in a hub: it
+        reaches each end within the largest overlap of the links there, 0 at a dead end, plus STRICT_SLACK (#85).
         """
-        return length - (end - start) <= self._overlap + STRICT_SLACK
+        return (start <= self._end_overlap.get((contig, False), 0) + STRICT_SLACK
+                and length - end <= self._end_overlap.get((contig, True), 0) + STRICT_SLACK)
 
     @staticmethod
     def _hub(covered: Iterable[tuple[str, Strand]]) -> RepeatHub:
@@ -76,7 +81,7 @@ class Hubs:
     def of_path(self, records: list['AlignmentRecord']) -> RepeatHub:
         """The repeat hub of a stitched path: the contigs its records cover end to end, in the target's direction."""
         return self._hub((f.t_name, Strand(f.strand)) for f in records
-                         if self._covers(f.t_length, f.t_start, f.t_end))
+                         if self._covers(f.t_name, f.t_length, f.t_start, f.t_end))
 
     def of_locus(self, locus: 'Locus') -> RepeatHub:
         """
@@ -84,7 +89,7 @@ class Hubs:
         unique sequence, not part of it.
         """
         return self._hub((seg.contig, seg.strand) for target in locus.targets for seg in target.segments
-                         if self._covers(self.contig_lengths[seg.contig], seg.start, seg.end))
+                         if self._covers(seg.contig, self.contig_lengths[seg.contig], seg.start, seg.end))
 
     @classmethod
     def group(cls, hubs: list[RepeatHub]) -> list[tuple[RepeatHub, list[int]]]:
