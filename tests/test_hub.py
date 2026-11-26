@@ -24,7 +24,7 @@ def hubs(lengths: dict[str, int], edges: Iterable[Edge] = ()) -> Hubs:
 
 
 def test_a_contig_is_in_the_hub_only_if_the_target_covers_it_end_to_end():
-    # Links overlap by 50, so a target may stop 50 + END_SLOP short of a contig's ends
+    # Links overlap by 50, so a target may stop 50 + STRICT_SLACK short of a contig's ends
     h = hubs({"a": 5000, "hub": 800, "short": 800, "b": 5000}, [Edge("a", F, "hub", F, 50)])
 
     path = h.of_path([record("a", 5000, 4800, 5000), record("hub", 800, 30, 770), record("short", 800, 0, 700)])

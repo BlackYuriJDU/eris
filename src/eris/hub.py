@@ -7,17 +7,13 @@ a contig are merged, and which links leave it; each keeps its own walk out of it
 from dataclasses import dataclass
 from typing import Iterable, Iterator, TYPE_CHECKING
 
-from eris.graph import Edge, Graph
+from eris.graph import STRICT_SLACK, Edge, Graph
 from eris.interval import Strand
 
 if TYPE_CHECKING:
     from eris.alignment import AlignmentRecord
     from eris.io import GenomeAssembly
     from eris.pipeline import Locus
-
-# Constants ------------------------------------------------------------------------------------------------------------
-END_SLOP = 10  # bp a target alignment may stop short of a contig's ends, beyond the link overlap, and still cover it
-
 
 # Classes --------------------------------------------------------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
@@ -54,7 +50,7 @@ class Hubs:
         # A GFA link is written once but holds on both strands, so add its complement for walking the other way
         self.graph = Graph(edges + [e.complement() for e in edges])
         self.contig_lengths = contig_lengths
-        self._overlap = max((e.overlap for e in edges), default=0)  # the largest link overlap in the graph (#85)
+        self._overlap = max((e.overlap for e in edges), default=0)  # the largest link overlap in the graph
 
     @classmethod
     def from_genome(cls, genome: 'GenomeAssembly') -> 'Hubs':
@@ -62,8 +58,12 @@ class Hubs:
         return cls(list(genome.edges), genome.contig_lengths)
 
     def _covers(self, length: int, start: int, end: int) -> bool:
-        """True if an alignment from `start` to `end` covers a contig of `length` end to end, so it is in a hub."""
-        return length - (end - start) <= self._overlap + END_SLOP
+        """
+        True if an alignment from `start` to `end` covers a contig of `length` end to end, so it is in a hub. Its
+        shortfall at both ends is summed against the graph's largest link overlap: judging each end against its own
+        overlap made single-copy IS contigs linked at both ends into hubs, and cost copy number edges (#85).
+        """
+        return length - (end - start) <= self._overlap + STRICT_SLACK
 
     @staticmethod
     def _hub(covered: Iterable[tuple[str, Strand]]) -> RepeatHub:

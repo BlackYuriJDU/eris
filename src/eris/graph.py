@@ -8,6 +8,8 @@ from eris.interval import Strand
 from eris.alignment import AlignmentBatch, AlignmentRecord
 
 OVERLAP_SLACK = 50  # bp a fragment may stop short of, or overlap, a link beyond the link's own overlap
+# Coverage is stricter than stitching: a false reach pulls unique sequence into a hub, or another IS onto a branch
+STRICT_SLACK = 10  # bp a target may stop short of a contig end, or start into one, and still count as reaching it (#85)
 
 
 # Classes --------------------------------------------------------------------------------------------------------------
