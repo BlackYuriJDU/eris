@@ -1,0 +1,486 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.13, pytest-9.0.3, pluggy-1.6.0
+rootdir: /Users/adimascf/UQ/eris
+configfile: pyproject.toml
+plugins: cov-7.1.0
+collected 31 items
+
+tests/test_integration.py exact-name P=0.887 R=0.887 F1=0.887
+family hub P=0.968 R=0.968 F1=0.968
+isoform max copy_number       P=0.968 R=0.968 F1=0.968
+isoform sum copy_number       P=0.968 R=0.968 F1=0.968
+isoform hub copy_number       P=0.968 R=0.968 F1=0.968
+isoform max copy_number_edges P=0.968 R=0.968 F1=0.968
+isoform sum copy_number_edges P=0.968 R=0.968 F1=0.968
+isoform hub copy_number_edges P=0.968 R=0.968 F1=0.968
+...exact-name P=0.902 R=0.939 F1=0.920
+family hub P=0.922 R=0.959 F1=0.940
+isoform max copy_number       P=0.922 R=0.959 F1=0.940
+isoform sum copy_number       P=0.922 R=0.959 F1=0.940
+isoform hub copy_number       P=0.922 R=0.959 F1=0.940
+isoform max copy_number_edges P=0.900 R=0.918 F1=0.909
+isoform sum copy_number_edges P=0.917 R=0.898 F1=0.907
+isoform hub copy_number_edges P=0.917 R=0.898 F1=0.907
+....exact-name P=0.848 R=0.903 F1=0.875
+family hub P=0.924 R=0.984 F1=0.953
+isoform max copy_number       P=0.909 R=0.968 F1=0.937
+isoform sum copy_number       P=0.909 R=0.968 F1=0.937
+isoform hub copy_number       P=0.909 R=0.968 F1=0.937
+isoform max copy_number_edges P=0.889 R=0.903 F1=0.896
+isoform sum copy_number_edges P=0.885 R=0.871 F1=0.878
+isoform hub copy_number_edges P=0.885 R=0.871 F1=0.878
+......
+complete:
+recall upstream: 51/59 = 0.864
+recall downstream: 44/59 = 0.746
+recall pooled over sides: 97/118 = 0.822
+precision of first flanks: 76/124 = 0.613
+distance band agreement: 0.708 (median error 0.0 bp, max 287 bp)
+disrupted precision: 8/46 = 0.174
+disrupted recall: 8/19 = 0.421
+misses: 22, of which 1 within reach of a larger hops budget
+  gene   ('IS1A', 'upstream', 'EC958_RS30185')
+  gene   ('IS1X1', 'downstream', 'EC958_RS30560')
+  gene   ('IS1X1', 'upstream', 'EC958_RS30140')
+  gene   ('IS2', 'downstream', 'EC958_RS30340')
+  budget ('IS26', 'downstream', 'EC958_RS25830')
+  gene   ('IS26', 'downstream', 'EC958_RS26485')
+  gene   ('IS26', 'downstream', 'EC958_RS29660')
+  gene   ('IS26', 'upstream', 'EC958_RS29475')
+  gene   ('IS3411', 'upstream', 'EC958_RS29355')
+  gene   ('IS600', 'downstream', 'EC958_RS28175')
+  gene   ('IS609', 'downstream', 'EC958_RS10865')
+  gene   ('IS609', 'upstream', 'EC958_RS10860')
+  gene   ('IS6100', 'upstream', 'EC958_RS29565')
+  gene   ('ISEc22', 'downstream', 'EC958_RS29550')
+  gene   ('ISEc23', 'downstream', 'EC958_RS01090')
+  gene   ('ISEc23', 'downstream', 'EC958_RS11750')
+  gene   ('ISEc52', 'downstream', 'EC958_RS28255')
+  gene   ('ISEc53', 'downstream', 'EC958_RS25065')
+  gene   ('ISSen1', 'downstream', 'EC958_RS24890')
+  gene   ('ISSen1', 'upstream', 'EC958_RS29720')
+  gene   ('ISSen10', 'downstream', 'EC958_RS20820')
+  gene   ('ISSen10', 'upstream', 'EC958_RS20830')
+nucleotide mismatches: [('ISEc52', 'upstream', 'EC958_RS24680')]
+UPREGULATED calls (not scored): []
+unplaceable flank genes: []
+per IS family, for reference:
+  recall upstream: 51/59 = 0.864
+  recall downstream: 44/59 = 0.746
+  recall pooled over sides: 98/118 = 0.831
+  precision of first flanks: 77/124 = 0.621
+...
+fragmented:
+recall upstream: 35/47 = 0.745
+recall downstream: 33/48 = 0.688
+recall pooled over sides: 71/95 = 0.747
+precision of first flanks: 38/78 = 0.487
+distance band agreement: 0.725 (median error 0 bp, max 170 bp)
+disrupted precision: 3/32 = 0.094
+disrupted recall: 6/17 = 0.353
+misses: 26, of which 1 within reach of a larger hops budget
+  gene   ('IS100', 'upstream', 'EC958_RS30525')
+  gene   ('IS1X1', 'downstream', 'EC958_RS29430')
+  gene   ('IS1X1', 'downstream', 'EC958_RS30560')
+  gene   ('IS1X1', 'upstream', 'EC958_RS30140')
+  gene   ('IS2', 'downstream', 'EC958_RS30340')
+  gene   ('IS3411', 'downstream', 'EC958_RS20830')
+  gene   ('IS600', 'upstream', 'EC958_RS16650')
+  gene   ('IS609', 'downstream', 'EC958_RS10865')
+  gene   ('IS609', 'upstream', 'EC958_RS10860')
+  gene   ('IS682', 'upstream', 'EC958_RS30005')
+  gene   ('ISEc12', 'downstream', 'EC958_RS07600')
+  gene   ('ISEc12', 'downstream', 'EC958_RS11780')
+  gene   ('ISEc12', 'upstream', 'EC958_RS07585')
+  gene   ('ISEc12', 'upstream', 'EC958_RS15715')
+  gene   ('ISEc22', 'downstream', 'EC958_RS29550')
+  budget ('ISEc22', 'upstream', 'EC958_RS16805')
+  gene   ('ISEc23', 'downstream', 'EC958_RS11750')
+  gene   ('ISEc23', 'upstream', 'EC958_RS30575')
+  gene   ('ISEc52', 'downstream', 'EC958_RS28255')
+  gene   ('ISEc52', 'downstream', 'EC958_RS29425')
+  gene   ('ISEc52', 'upstream', 'EC958_RS24680')
+  gene   ('ISEc53', 'downstream', 'EC958_RS25065')
+  gene   ('ISSen1', 'downstream', 'EC958_RS24890')
+  gene   ('ISSen1', 'upstream', 'EC958_RS29720')
+  gene   ('ISSen10', 'downstream', 'EC958_RS20820')
+  gene   ('ISSen10', 'upstream', 'EC958_RS20830')
+nucleotide mismatches: [('IS1A', 'upstream', 'EC958_RS30330'), ('IS200', 'downstream', 'EC958_RS11105'), ('IS682', 'downstream', 'EC958_RS16810')]
+UPREGULATED calls (not scored): []
+unplaceable flank genes: ['1002621_3_131', '1078295_1_174', '1111349_3_158', '1135873_78_158', '1188915_1_123', '1197033_76_222', '1203713_200_292', '1227020_39_221', '1240608_1_192', '1242046_29_220', '1242486_786_890', '1242602_1299_1439', '1244320_3283_3393', '1244454_573_641', '1244764_135465_135632', '1244890_8881_8946', '1245024_32451_32558', '1245038_99341_99433', '1245046_512123_512206', '1245048_14920_15024', '1245070_98_244', '1245106_18577_18642', '852799_1_138']
+per IS family, for reference:
+  recall upstream: 37/47 = 0.787
+  recall downstream: 34/48 = 0.708
+  recall pooled over sides: 75/95 = 0.789
+  precision of first flanks: 39/78 = 0.500
+..s
+complete, collapse mode:
+assignment of eris's own genes to IS sides (IS-detection errors excluded):
+  side                             precision 117/120 = 0.975  recall 118/120 = 0.983  F1 0.979
+  side + nearest (headline)        precision 117/120 = 0.975  recall 118/120 = 0.983  F1 0.979
+  side + nearest + distance band   precision 113/120 = 0.942  recall 113/120 = 0.942  F1 0.942
+  distance on found relations: band agreement 0.958, error median 0.0 bp, max 119 bp
+  (recall is the same in the side and nearest tiers: every expected relation is a nearest gene)
+  excluded: FP_overcall 4 of 124 first flanks, FN_undetected 4 of 124 expected relations
+  FP by cause: FP_unplaced 0, FP_overcall 4, FP_side 2, FP_group 0, FP_not_nearest 1
+  FN by cause: FN_undetected 4, FN_side 2, FN_group 0, FN_budget 0, FN_unreported 0
+    FN_side         ('IS609', 'downstream', 'HG941718.1_2104066_2104614')
+    FN_side         ('IS609', 'upstream', 'HG941718.1_2103359_2103856')
+    FN_undetected   ('ISSen1', 'downstream', 'HG941718.1_4977172_4977423')
+    FN_undetected   ('ISSen1', 'upstream', 'HG941718.1_4976210_4976368')
+    FN_undetected   ('ISSen10', 'downstream', 'HG941718.1_4155982_4156059')
+    FN_undetected   ('ISSen10', 'upstream', 'HG941718.1_4156672_4158180')
+    FP_not_nearest  ('ISCfr4', 'downstream', 'HG941718.1_1365823_1366380')
+    FP_overcall     ('ISEc49', 'downstream', 'HG941718.1_4160353_4160985')
+    FP_overcall     ('ISEc49', 'downstream', 'HG941718.1_4161807_4162394')
+    FP_overcall     ('ISEc49', 'upstream', 'HG941718.1_4161108_4161491')
+    FP_overcall     ('ISEc49', 'upstream', 'HG941718.1_4163445_4164032')
+    FP_side         ('IS609', 'downstream', 'HG941718.1_2103359_2103856')
+    FP_side         ('IS609', 'upstream', 'HG941718.1_2104066_2104614')
+  distance band disagreements: 5
+    ('ISCfr4', 'downstream', 'HG941718.1_1366518_1369175')
+    ('ISEc12', 'downstream', 'HG941718.1_1482655_1482765')
+    ('ISEc12', 'upstream', 'HG941718.1_3110278_3111900')
+    ('ISEc12', 'upstream', 'HG941718.1_4971627_4971881')
+    ('ISEc22', 'upstream', 'HG941718.1_3335446_3336546')
+  any_copy universe:
+  side                             precision 111/120 = 0.925  recall 118/120 = 0.983  F1 0.953
+  side + nearest (headline)        precision 111/120 = 0.925  recall 118/120 = 0.983  F1 0.953
+  side + nearest + distance band   precision 107/120 = 0.892  recall 113/120 = 0.942  F1 0.916
+..
+complete, variant mode:
+assignment of eris's own genes to IS sides (IS-detection errors excluded):
+  side                             precision 117/120 = 0.975  recall 118/120 = 0.983  F1 0.979
+  side + nearest (headline)        precision 117/120 = 0.975  recall 118/120 = 0.983  F1 0.979
+  side + nearest + distance band   precision 113/120 = 0.942  recall 113/120 = 0.942  F1 0.942
+  distance on found relations: band agreement 0.958, error median 0.0 bp, max 119 bp
+  (recall is the same in the side and nearest tiers: every expected relation is a nearest gene)
+  excluded: FP_overcall 4 of 124 first flanks, FN_undetected 4 of 124 expected relations
+  FP by cause: FP_unplaced 0, FP_overcall 4, FP_side 2, FP_group 0, FP_not_nearest 1
+  FN by cause: FN_undetected 4, FN_side 2, FN_group 0, FN_budget 0, FN_unreported 0
+    FN_side         ('IS609', 'downstream', 'HG941718.1_2104066_2104614')
+    FN_side         ('IS609', 'upstream', 'HG941718.1_2103359_2103856')
+    FN_undetected   ('ISSen1', 'downstream', 'HG941718.1_4977172_4977423')
+    FN_undetected   ('ISSen1', 'upstream', 'HG941718.1_4976210_4976368')
+    FN_undetected   ('ISSen10', 'downstream', 'HG941718.1_4155982_4156059')
+    FN_undetected   ('ISSen10', 'upstream', 'HG941718.1_4156672_4158180')
+    FP_not_nearest  ('ISCfr4', 'downstream', 'HG941718.1_1365823_1366380')
+    FP_overcall     ('ISEc49', 'downstream', 'HG941718.1_4160353_4160985')
+    FP_overcall     ('ISEc49', 'downstream', 'HG941718.1_4161807_4162394')
+    FP_overcall     ('ISEc49', 'upstream', 'HG941718.1_4161108_4161491')
+    FP_overcall     ('ISEc49', 'upstream', 'HG941718.1_4163445_4164032')
+    FP_side         ('IS609', 'downstream', 'HG941718.1_2103359_2103856')
+    FP_side         ('IS609', 'upstream', 'HG941718.1_2104066_2104614')
+  distance band disagreements: 5
+    ('ISCfr4', 'downstream', 'HG941718.1_1366518_1369175')
+    ('ISEc12', 'downstream', 'HG941718.1_1482655_1482765')
+    ('ISEc12', 'upstream', 'HG941718.1_3110278_3111900')
+    ('ISEc12', 'upstream', 'HG941718.1_4971627_4971881')
+    ('ISEc22', 'upstream', 'HG941718.1_3335446_3336546')
+  any_copy universe:
+  side                             precision 111/120 = 0.925  recall 118/120 = 0.983  F1 0.953
+  side + nearest (headline)        precision 111/120 = 0.925  recall 118/120 = 0.983  F1 0.953
+  side + nearest + distance band   precision 107/120 = 0.892  recall 113/120 = 0.942  F1 0.916
+..
+fragmented, collapse mode:
+assignment of eris's own genes to IS sides (IS-detection errors excluded):
+  side                             precision 64/74 = 0.865  recall 80/92 = 0.870  F1 0.867
+  side + nearest (headline)        precision 60/74 = 0.811  recall 80/92 = 0.870  F1 0.839
+  side + nearest + distance band   precision 59/74 = 0.797  recall 77/92 = 0.837  F1 0.817
+  distance on found relations: band agreement 0.963, error median 0.0 bp, max 945 bp
+  (recall is the same in the side and nearest tiers: every expected relation is a nearest gene)
+  excluded: FP_overcall 4 of 78 first flanks, FN_undetected 5 of 97 expected relations
+  FP by cause: FP_unplaced 5, FP_overcall 4, FP_side 1, FP_group 2, FP_not_nearest 6
+  FN by cause: FN_undetected 5, FN_side 2, FN_group 2, FN_budget 0, FN_unreported 8
+    FN_group        ('ISEc22', 'upstream', '1244674_144_1244')
+    FN_group        ('ISEc52', 'upstream', '1206755_158_400')
+    FN_side         ('IS609', 'downstream', '1244458_193_717')
+    FN_side         ('IS609', 'upstream', '1244578_149_646')
+    FN_undetected   ('IS3411', 'downstream', '1245106_115_594')
+    FN_undetected   ('ISSen1', 'downstream', '1245024_2279_2530')
+    FN_undetected   ('ISSen1', 'upstream', '1245024_1317_1475')
+    FN_undetected   ('ISSen10', 'downstream', '1245106_3322_3399')
+    FN_undetected   ('ISSen10', 'upstream', '1245106_1201_2709')
+    FN_unreported   ('IS600', 'upstream', '1242602_126_1277')
+    FN_unreported   ('ISEc12', 'downstream', '1240840_119_457')
+    FN_unreported   ('ISEc12', 'downstream', '1242518_223_333')
+    FN_unreported   ('ISEc12', 'upstream', '1243278_59_1681')
+    FN_unreported   ('ISEc12', 'upstream', '1244912_33_491')
+    FN_unreported   ('ISEc23', 'downstream', '1243458_2550_2825')
+    FN_unreported   ('ISEc23', 'upstream', '1245118_80_268')
+    FN_unreported   ('ISEc52', 'downstream', '1244890_87_500')
+    FP_group        ('IS3411', 'downstream', '1245106_3322_3399')
+    FP_group        ('IS3411', 'upstream', '1245106_1201_2709')
+    FP_not_nearest  ('IS1A', 'downstream', '1208153_1_267')
+    FP_not_nearest  ('IS1A', 'upstream', '1171599_3_173')
+    FP_not_nearest  ('IS30', 'downstream', '1242602_3_80')
+    FP_not_nearest  ('IS600', 'upstream', '1243600_194_367')
+    FP_not_nearest  ('ISCfr4', 'downstream', '1245002_71591_72175')
+    FP_not_nearest  ('ISEc8', 'upstream', '1242486_1_270')
+    FP_overcall     ('ISEc49', 'downstream', '1244656_1061_1693')
+    FP_overcall     ('ISEc49', 'downstream', '1244656_2515_3102')
+    FP_overcall     ('ISEc49', 'upstream', '1244656_1816_2199')
+    FP_overcall     ('ISEc49', 'upstream', '1244656_4153_4740')
+    FP_side         ('IS609', 'upstream', '1244458_193_717')
+    FP_unplaced     ('IS1X1', 'upstream', '1244890_8881_8946')
+    FP_unplaced     ('IS1X1', 'upstream', '1245106_18577_18642')
+    FP_unplaced     ('IS30', 'upstream', '1242602_1299_1439')
+    FP_unplaced     ('IS3411', 'upstream', '1002621_3_131')
+    FP_unplaced     ('ISEc22', 'upstream', '1240608_1_192')
+  distance band disagreements: 3
+    ('IS1A', 'downstream', '1236016_212_325')
+    ('ISCfr4', 'downstream', '1245002_72313_74970')
+    ('ISEc12', 'upstream', '1233030_2_316')
+  any_copy universe:
+  side                             precision 60/74 = 0.811  recall 79/92 = 0.859  F1 0.834
+  side + nearest (headline)        precision 58/74 = 0.784  recall 79/92 = 0.859  F1 0.820
+  side + nearest + distance band   precision 57/74 = 0.770  recall 76/92 = 0.826  F1 0.797
+..
+fragmented, variant mode:
+assignment of eris's own genes to IS sides (IS-detection errors excluded):
+  side                             precision 82/96 = 0.854  recall 78/91 = 0.857  F1 0.856
+  side + nearest (headline)        precision 77/96 = 0.802  recall 78/91 = 0.857  F1 0.829
+  side + nearest + distance band   precision 73/96 = 0.760  recall 73/91 = 0.802  F1 0.781
+  distance on found relations: band agreement 0.936, error median 0.0 bp, max 945 bp
+  (recall is the same in the side and nearest tiers: every expected relation is a nearest gene)
+  excluded: FP_overcall 4 of 100 first flanks, FN_undetected 6 of 97 expected relations
+  FP by cause: FP_unplaced 6, FP_overcall 4, FP_side 1, FP_group 4, FP_not_nearest 7
+  FN by cause: FN_undetected 6, FN_side 1, FN_group 2, FN_budget 6, FN_unreported 4
+    FN_budget       ('IS1397', 'upstream', '1244964_169_1179')
+    FN_budget       ('IS1A', 'downstream', '1245038_98887_99339')
+    FN_budget       ('IS1A', 'upstream', '1244936_3024_3293')
+    FN_budget       ('IS1A', 'upstream', '1245046_511492_512118')
+    FN_budget       ('IS1X1', 'upstream', '1245106_18250_18561')
+    FN_budget       ('ISEc8', 'upstream', '1245098_660_788')
+    FN_group        ('ISEc22', 'upstream', '1244674_144_1244')
+    FN_group        ('ISEc52', 'upstream', '1206755_158_400')
+    FN_side         ('IS609', 'downstream', '1244458_193_717')
+    FN_undetected   ('IS3411', 'downstream', '1245106_115_594')
+    FN_undetected   ('IS3411', 'upstream', '1244656_358_903')
+    FN_undetected   ('ISSen1', 'downstream', '1245024_2279_2530')
+    FN_undetected   ('ISSen1', 'upstream', '1245024_1317_1475')
+    FN_undetected   ('ISSen10', 'downstream', '1245106_3322_3399')
+    FN_undetected   ('ISSen10', 'upstream', '1245106_1201_2709')
+    FN_unreported   ('IS609', 'upstream', '1244578_149_646')
+    FN_unreported   ('IS609', 'upstream', '1244764_135242_135442')
+    FN_unreported   ('ISEc12', 'upstream', '1244912_33_491')
+    FN_unreported   ('ISEc23', 'upstream', '1245118_80_268')
+    FP_group        ('IS3411', 'downstream', '1245106_3322_3399')
+    FP_group        ('IS3411', 'upstream', '1245106_1201_2709')
+    FP_group        ('IS600', 'downstream', '1228204_3_239')
+    FP_group        ('IS600', 'upstream', '1243600_2_142')
+    FP_not_nearest  ('IS1A', 'downstream', '1208153_1_267')
+    FP_not_nearest  ('IS1A', 'upstream', '1171599_3_173')
+    FP_not_nearest  ('IS30', 'downstream', '1242602_3_80')
+    FP_not_nearest  ('IS600', 'upstream', '1206755_2_142')
+    FP_not_nearest  ('IS600', 'upstream', '1243600_194_367')
+    FP_not_nearest  ('ISCfr4', 'downstream', '1245002_71591_72175')
+    FP_not_nearest  ('ISEc8', 'upstream', '1242486_1_270')
+    FP_overcall     ('ISEc49', 'downstream', '1244656_1061_1693')
+    FP_overcall     ('ISEc49', 'downstream', '1244656_2515_3102')
+    FP_overcall     ('ISEc49', 'upstream', '1244656_1816_2199')
+    FP_overcall     ('ISEc49', 'upstream', '1244656_4153_4740')
+    FP_side         ('IS609', 'upstream', '1244458_193_717')
+    FP_unplaced     ('IS1X1', 'upstream', '1244890_8881_8946')
+    FP_unplaced     ('IS30', 'upstream', '1242602_1299_1439')
+    FP_unplaced     ('IS3411', 'upstream', '1002621_3_131')
+    FP_unplaced     ('ISEc22', 'upstream', '1240608_1_192')
+    FP_unplaced     ('ISEc52', 'downstream', '1245024_32451_32558')
+    FP_unplaced     ('ISEc8', 'downstream', '1240608_1_192')
+  distance band disagreements: 5
+    ('IS1A', 'downstream', '1236016_212_325')
+    ('ISCfr4', 'downstream', '1245002_72313_74970')
+    ('ISEc12', 'downstream', '1242518_223_333')
+    ('ISEc12', 'upstream', '1233030_2_316')
+    ('ISEc12', 'upstream', '1243278_59_1681')
+  any_copy universe:
+  side                             precision 77/96 = 0.802  recall 77/91 = 0.846  F1 0.824
+  side + nearest (headline)        precision 75/96 = 0.781  recall 77/91 = 0.846  F1 0.812
+  side + nearest + distance band   precision 70/96 = 0.729  recall 71/91 = 0.780  F1 0.754
+..
+real, collapse mode:
+assignment of eris's own genes to IS sides (IS-detection errors excluded):
+  side                             precision 67/79 = 0.848  recall 94/120 = 0.783  F1 0.814
+  side + nearest (headline)        precision 64/79 = 0.810  recall 94/120 = 0.783  F1 0.797
+  side + nearest + distance band   precision 63/79 = 0.797  recall 90/120 = 0.750  F1 0.773
+  distance on found relations: band agreement 0.957, error median 0.0 bp, max 1743 bp
+  (recall is the same in the side and nearest tiers: every expected relation is a nearest gene)
+  excluded: FP_overcall 4 of 83 first flanks, FN_undetected 4 of 124 expected relations
+  FP by cause: FP_unplaced 7, FP_overcall 4, FP_side 1, FP_group 2, FP_not_nearest 5
+  FN by cause: FN_undetected 4, FN_side 2, FN_group 4, FN_budget 1, FN_unreported 19
+    FN_budget       ('IS26', 'upstream', '2416277_55_2070')
+    FN_group        ('IS26', 'downstream', '2419854_1_87')
+    FN_group        ('ISEc12', 'downstream', '2339717_2_106')
+    FN_group        ('ISEc22', 'upstream', '2420294_104_1204')
+    FN_group        ('ISEc52', 'upstream', '2416971_22_225')
+    FN_side         ('IS609', 'downstream', '2419940_30823_31236')
+    FN_side         ('IS609', 'upstream', '2419948_17153_17650')
+    FN_undetected   ('ISSen1', 'downstream', '2420282_29992_30243')
+    FN_undetected   ('ISSen1', 'upstream', '2420282_31047_31205')
+    FN_undetected   ('ISSen10', 'downstream', '2419496_1_495')
+    FN_undetected   ('ISSen10', 'upstream', '2402724_449_1957')
+    FN_unreported   ('IS26', 'downstream', '2419936_10176_11081')
+    FN_unreported   ('IS26', 'downstream', '2419936_1_237')
+    FN_unreported   ('IS26', 'downstream', '2420268_803_1522')
+    FN_unreported   ('IS26', 'downstream', '2420676_23_157')
+    FN_unreported   ('IS26', 'upstream', '2412009_2_505')
+    FN_unreported   ('IS26', 'upstream', '2418902_4830_5795')
+    FN_unreported   ('IS26', 'upstream', '2421014_5513_7786')
+    FN_unreported   ('IS26', 'upstream', '2421078_21711_22349')
+    FN_unreported   ('IS26', 'upstream', '2421282_2_82')
+    FN_unreported   ('IS3411', 'downstream', '2402724_2564_2779')
+    FN_unreported   ('IS3411', 'downstream', '2417355_1_207')
+    FN_unreported   ('IS600', 'upstream', '2418794_86_1237')
+    FN_unreported   ('ISEc12', 'downstream', '2417725_79_417')
+    FN_unreported   ('ISEc12', 'upstream', '2418533_19_1641')
+    FN_unreported   ('ISEc12', 'upstream', '2419806_290_739')
+    FN_unreported   ('ISEc23', 'downstream', '2419792_2510_2785')
+    FN_unreported   ('ISEc23', 'upstream', '2416727_8999_9187')
+    FN_unreported   ('ISEc52', 'downstream', '2416193_8410_8823')
+    FN_unreported   ('ISEc9', 'downstream', '2418768_217_1197')
+    FP_group        ('IS3411', 'downstream', '2419496_1_495')
+    FP_group        ('IS3411', 'downstream', '2420468_1_114')
+    FP_not_nearest  ('IS1A', 'upstream', '2420366_56_256')
+    FP_not_nearest  ('IS600', 'upstream', '2419478_18524_18697')
+    FP_not_nearest  ('ISCfr4', 'downstream', '2418565_61184_61768')
+    FP_not_nearest  ('ISEc8', 'downstream', '2416727_262_477')
+    FP_not_nearest  ('ISEc8', 'upstream', '2418702_582_809')
+    FP_overcall     ('ISEc49', 'downstream', '2419876_7802_8389')
+    FP_overcall     ('ISEc49', 'downstream', '2419876_9211_9843')
+    FP_overcall     ('ISEc49', 'upstream', '2419876_6209_6751')
+    FP_overcall     ('ISEc49', 'upstream', '2419876_8705_9088')
+    FP_side         ('IS609', 'upstream', '2419940_30823_31236')
+    FP_unplaced     ('IS1X1', 'downstream', '2059700_2_142')
+    FP_unplaced     ('IS1X1', 'downstream', '2368768_2_142')
+    FP_unplaced     ('IS30', 'upstream', '2418794_1259_1360')
+    FP_unplaced     ('ISEc12', 'downstream', '161047_2_70')
+    FP_unplaced     ('ISEc22', 'downstream', '2416987_1003_1071')
+    FP_unplaced     ('ISEc22', 'upstream', '630745_2_79')
+    FP_unplaced     ('ISEc52', 'downstream', '2367790_1_129')
+  distance band disagreements: 4
+    ('IS1A', 'downstream', '2420448_1187_1312')
+    ('IS26', 'downstream', '2418527_3_512')
+    ('ISCfr4', 'downstream', '2418565_61906_64563')
+    ('ISEc12', 'upstream', '2420380_1_165')
+  any_copy universe:
+  side                             precision 65/79 = 0.823  recall 93/120 = 0.775  F1 0.798
+  side + nearest (headline)        precision 62/79 = 0.785  recall 93/120 = 0.775  F1 0.780
+  side + nearest + distance band   precision 61/79 = 0.772  recall 89/120 = 0.742  F1 0.757
+.F
+real, variant mode:
+assignment of eris's own genes to IS sides (IS-detection errors excluded):
+  side                             precision 108/140 = 0.771  recall 101/120 = 0.842  F1 0.805
+  side + nearest (headline)        precision 101/140 = 0.721  recall 101/120 = 0.842  F1 0.777
+  side + nearest + distance band   precision 98/140 = 0.700  recall 95/120 = 0.792  F1 0.743
+  distance on found relations: band agreement 0.941, error median 0 bp, max 1744 bp
+  (recall is the same in the side and nearest tiers: every expected relation is a nearest gene)
+  excluded: FP_overcall 4 of 144 first flanks, FN_undetected 4 of 124 expected relations
+  FP by cause: FP_unplaced 18, FP_overcall 4, FP_side 1, FP_group 4, FP_not_nearest 12
+  FN by cause: FN_undetected 4, FN_side 2, FN_group 3, FN_budget 9, FN_unreported 5
+    FN_budget       ('IS1397', 'upstream', '2420246_11_181')
+    FN_budget       ('IS26', 'upstream', '2412009_2_505')
+    FN_budget       ('IS26', 'upstream', '2421014_5513_7786')
+    FN_budget       ('IS26', 'upstream', '2421078_21711_22349')
+    FN_budget       ('ISEc12', 'upstream', '2420380_1_165')
+    FN_budget       ('ISEc22', 'downstream', '2421266_62_445')
+    FN_budget       ('ISEc23', 'downstream', '2420376_8630_9643')
+    FN_budget       ('ISEc23', 'upstream', '2420074_39_434')
+    FN_budget       ('ISEc23', 'upstream', '2421212_6881_8077')
+    FN_group        ('ISEc22', 'upstream', '2420294_104_1204')
+    FN_group        ('ISEc23', 'downstream', '2419792_2510_2785')
+    FN_group        ('ISEc52', 'upstream', '2416971_22_225')
+    FN_side         ('IS26', 'upstream', '2418902_4830_5795')
+    FN_side         ('IS609', 'downstream', '2419940_30823_31236')
+    FN_undetected   ('ISSen1', 'downstream', '2420282_29992_30243')
+    FN_undetected   ('ISSen1', 'upstream', '2420282_31047_31205')
+    FN_undetected   ('ISSen10', 'downstream', '2419496_1_495')
+    FN_undetected   ('ISSen10', 'upstream', '2402724_449_1957')
+    FN_unreported   ('IS26', 'downstream', '2419936_10176_11081')
+    FN_unreported   ('IS26', 'downstream', '2420268_803_1522')
+    FN_unreported   ('IS609', 'upstream', '2419948_17153_17650')
+    FN_unreported   ('IS609', 'upstream', '2421278_133398_135122')
+    FN_unreported   ('ISEc23', 'downstream', '2420362_10091_10168')
+    FP_group        ('IS3411', 'downstream', '2419496_1_495')
+    FP_group        ('IS3411', 'downstream', '2420468_1_114')
+    FP_group        ('IS3411', 'upstream', '2402724_449_1957')
+    FP_group        ('IS600', 'downstream', '2396236_3_239')
+    FP_not_nearest  ('IS1A', 'upstream', '2420366_56_256')
+    FP_not_nearest  ('IS1X1', 'upstream', '2420228_56_319')
+    FP_not_nearest  ('IS26', 'upstream', '2421250_2_499')
+    FP_not_nearest  ('IS3411', 'downstream', '2395472_3_509')
+    FP_not_nearest  ('IS3411', 'upstream', '2264833_1_132')
+    FP_not_nearest  ('IS600', 'upstream', '2419478_18524_18697')
+    FP_not_nearest  ('ISCfr4', 'downstream', '2418565_61184_61768')
+    FP_not_nearest  ('ISEc23', 'downstream', '2419876_9211_9843')
+    FP_not_nearest  ('ISEc8', 'downstream', '2394944_2_682')
+    FP_not_nearest  ('ISEc8', 'downstream', '2416727_262_477')
+    FP_not_nearest  ('ISEc8', 'upstream', '2418702_582_809')
+    FP_not_nearest  ('ISEc9', 'downstream', '2420354_947_2092')
+    FP_overcall     ('ISEc49', 'downstream', '2419876_7802_8389')
+    FP_overcall     ('ISEc49', 'downstream', '2419876_9211_9843')
+    FP_overcall     ('ISEc49', 'upstream', '2419876_6209_6751')
+    FP_overcall     ('ISEc49', 'upstream', '2419876_8705_9088')
+    FP_side         ('IS609', 'upstream', '2419940_30823_31236')
+    FP_unplaced     ('IS1A', 'downstream', '2418956_1_111')
+    FP_unplaced     ('IS1A', 'downstream', '2421094_3_137')
+    FP_unplaced     ('IS1A', 'upstream', '2060500_3_74')
+    FP_unplaced     ('IS1A', 'upstream', '2421096_1_111')
+    FP_unplaced     ('IS1X1', 'downstream', '1197139_2_91')
+    FP_unplaced     ('IS1X1', 'downstream', '2059700_2_142')
+    FP_unplaced     ('IS1X1', 'downstream', '2368768_2_142')
+    FP_unplaced     ('IS200', 'upstream', '2421038_99231_99353')
+    FP_unplaced     ('IS26', 'downstream', '2418902_5828_5998')
+    FP_unplaced     ('IS26', 'upstream', '2421180_2_139')
+    FP_unplaced     ('IS30', 'upstream', '2418794_1259_1360')
+    FP_unplaced     ('IS3411', 'upstream', '2393385_1_87')
+    FP_unplaced     ('IS600', 'upstream', '1686800_1_141')
+    FP_unplaced     ('IS600', 'upstream', '2322214_1_141')
+    FP_unplaced     ('ISEc12', 'downstream', '161047_2_70')
+    FP_unplaced     ('ISEc22', 'downstream', '2416987_1003_1071')
+    FP_unplaced     ('ISEc22', 'upstream', '630745_2_79')
+    FP_unplaced     ('ISEc52', 'downstream', '2367790_1_129')
+  distance band disagreements: 6
+    ('IS1A', 'downstream', '2420448_1187_1312')
+    ('IS26', 'downstream', '2418527_3_512')
+    ('ISCfr4', 'downstream', '2418565_61906_64563')
+    ('ISEc12', 'downstream', '2339717_2_106')
+    ('ISEc12', 'upstream', '2418533_19_1641')
+    ('ISEc12', 'upstream', '2419806_290_739')
+  any_copy universe:
+  side                             precision 101/140 = 0.721  recall 100/120 = 0.833  F1 0.773
+  side + nearest (headline)        precision 97/140 = 0.693  recall 100/120 = 0.833  F1 0.757
+  side + nearest + distance band   precision 94/140 = 0.671  recall 94/120 = 0.783  F1 0.723
+..
+
+=================================== FAILURES ===================================
+_________ test_assignment_distance_bands_do_not_change[real-collapse] __________
+
+assignment_benchmark = (('real', 'collapse'), AssignmentScore(first_flanks=83, overcalls=4, precise={'side': 67, 'nearest': 64, 'distance': 6...6', 'upstream', '2421014_5513_7786'), 'FN_unreported'), (('IS3411', 'downstream', '2417355_1_207'), 'FN_unreported')}))
+
+    @pytest.mark.slow
+    def test_assignment_distance_bands_do_not_change(assignment_benchmark):
+        run, score = assignment_benchmark
+>       assert_unchanged(score.band_errors, KNOWN_DISTANCE_BAND_ERRORS[run], "KNOWN_DISTANCE_BAND_ERRORS")
+
+tests/test_integration.py:853: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+found = {('IS1A', 'downstream', '2420448_1187_1312'), ('IS26', 'downstream', '2418527_3_512'), ('ISCfr4', 'downstream', '2418565_61906_64563'), ('ISEc12', 'upstream', '2420380_1_165')}
+known = {('IS26', 'downstream', '2418527_3_512'), ('ISCfr4', 'downstream', '2418565_61906_64563'), ('ISEc12', 'upstream', '2420380_1_165')}
+table = 'KNOWN_DISTANCE_BAND_ERRORS'
+
+    def assert_unchanged(found, known, table: str):
+        """A ratchet: what was found must equal the known table, so fixes get noticed as well as regressions."""
+>       assert found == known, f"eris changed; if it got better, update {table}"
+E       AssertionError: eris changed; if it got better, update KNOWN_DISTANCE_BAND_ERRORS
+E       assert {('IS1A', 'do...20380_1_165')} == {('IS26', 'do...20380_1_165')}
+E         
+E         Extra items in the left set:
+E         ('IS1A', 'downstream', '2420448_1187_1312')
+E         Use -v to get more diff
+
+tests/test_integration.py:464: AssertionError
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_integration.py:532: the nucleotide check is ratcheted on the complete genome only
+FAILED tests/test_integration.py::test_assignment_distance_bands_do_not_change[real-collapse]
+============== 1 failed, 29 passed, 1 skipped in 93.76s (0:01:33) ==============
