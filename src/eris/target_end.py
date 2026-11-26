@@ -7,7 +7,7 @@ from typing import Optional
 
 from eris.alignment import AlignmentBatch, AlignmentRecord
 from eris.constants import Context, Strand
-from eris.graph import OVERLAP_SLACK, Edge, TopologyEngine
+from eris.graph import OVERLAP_SLACK, P85, STRICT_SLACK, Edge, TopologyEngine
 
 
 # Constants ------------------------------------------------------------------------------------------------------------
@@ -71,7 +71,8 @@ def carried_past_link(link: Edge, alignments: Mapping[str, AlignmentBatch], cont
     else:
         length = contig_lengths[link.v]
         starts, ends = length - batch.t_ends, length - batch.t_starts
-    entering = starts <= BRANCH_ENTRY_SLACK
+    # PROTOTYPE #85 change 2: start within the entry link's overlap + strict slack
+    entering = starts <= (link.overlap + STRICT_SLACK if 'entry' in P85 else BRANCH_ENTRY_SLACK)
     if not entering.any():
         return 0
     return max(0, int(ends[entering].max()) - link.overlap)

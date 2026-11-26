@@ -8,6 +8,27 @@ from eris.interval import Strand
 from eris.alignment import AlignmentBatch, AlignmentRecord
 
 OVERLAP_SLACK = 50  # bp a fragment may stop short of, or overlap, a link beyond the link's own overlap
+# PROTOTYPE #85 ---------------------------------------------------------------------------------------------------------
+# ERIS_P85 is a comma list of the rule changes to switch on: 'hub' (change 1), 'entry' (change 2). Throwaway.
+import os as _os
+P85 = frozenset(filter(None, _os.environ.get('ERIS_P85', '').split(',')))
+LENIENT_SLACK = OVERLAP_SLACK  # stitching: a missed reach loses a locus
+STRICT_SLACK = 10  # coverage: a false reach pulls unique sequence into a repeat hub
+START, END = 0, 1  # a contig's ends, on its forward strand
+
+
+def end_overlaps(edges) -> dict:
+    """PROTOTYPE #85: the largest overlap of the links at each contig end, as {(contig, START|END): bp}."""
+    ov = defaultdict(int)
+    for e in edges:
+        for key in ((e.u, END if e.u_strand == 1 else START), (e.v, START if e.v_strand == 1 else END)):
+            ov[key] = max(ov[key], e.overlap)
+    return ov
+
+
+def reaches_end(gap: int, overlap: int, slack: int) -> bool:
+    """PROTOTYPE #85: contig end reach, an alignment stopping `gap` bp from an end whose links overlap `overlap`."""
+    return gap <= overlap + slack
 
 
 # Classes --------------------------------------------------------------------------------------------------------------
